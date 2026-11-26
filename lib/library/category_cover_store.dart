@@ -72,6 +72,8 @@ class CategoryCoverStore extends ChangeNotifier {
   final Map<String, _CategoryCoverRecord> _records = {};
   final LinkedHashMap<String, Future<ImageProvider?>> _providers =
       LinkedHashMap<String, Future<ImageProvider?>>();
+  final LinkedHashMap<String, ImageProvider?> _resolvedProviders =
+      LinkedHashMap<String, ImageProvider?>();
   final Set<String> _discardedRecordKeys = <String>{};
   Future<void> _operation = Future<void>.value();
   Future<void>? _loadOperation;
@@ -89,14 +91,69 @@ class CategoryCoverStore extends ChangeNotifier {
 
   bool hasCover(MusicCategoryGroup group) => coverIdFor(group) != null;
 
+  /// Synchronously inspects whether [group]'s custom cover is already known in
+  /// memory (including the common `null` case when no custom cover is set).
+  ({bool hit, ImageProvider? provider}) peekImageFor(MusicCategoryGroup group) {
+    final id = coverIdFor(group);
+    if (id == null) return (hit: true, provider: null);
+    if (_resolvedProviders.containsKey(id)) {
+      final resolved = _resolvedProviders.remove(id);
+      _resolvedProviders[id] = resolved;
+      final cachedFuture = _providers.remove(id);
+      if (cachedFuture != null) _providers[id] = cachedFuture;
+      return (hit: true, provider: resolved);
+    }
+    final storePeek = _images.peekImageFor(id);
+    if (storePeek.hit) {
+      _resolvedProviders[id] = storePeek.provider;
+      _providers[id] = SynchronousFuture<ImageProvider?>(storePeek.provider);
+      while (_providers.length > 256) {
+        final oldest = _providers.keys.first;
+        _providers.remove(oldest);
+        _resolvedProviders.remove(oldest);
+      }
+      return storePeek;
+    }
+    return (hit: false, provider: null);
+  }
+
   Future<ImageProvider?> imageFor(MusicCategoryGroup group) {
     final id = coverIdFor(group);
-    if (id == null) return Future<ImageProvider?>.value();
+    if (id == null) return SynchronousFuture<ImageProvider?>(null);
     final cached = _providers.remove(id);
-    final result = cached ?? _images.imageFor(id);
+    if (cached != null) {
+      _providers[id] = cached;
+      if (_resolvedProviders.containsKey(id)) {
+        final resolved = _resolvedProviders.remove(id);
+        _resolvedProviders[id] = resolved;
+      }
+      return cached;
+    }
+    final storePeek = _images.peekImageFor(id);
+    if (storePeek.hit) {
+      final sync = SynchronousFuture<ImageProvider?>(storePeek.provider);
+      _providers[id] = sync;
+      _resolvedProviders[id] = storePeek.provider;
+      while (_providers.length > 256) {
+        final oldest = _providers.keys.first;
+        _providers.remove(oldest);
+        _resolvedProviders.remove(oldest);
+      }
+      return sync;
+    }
+    late final Future<ImageProvider?> result;
+    result = _images.imageFor(id).then((image) {
+      if (identical(_providers[id], result)) {
+        _providers[id] = SynchronousFuture<ImageProvider?>(image);
+        _resolvedProviders[id] = image;
+      }
+      return image;
+    });
     _providers[id] = result;
     while (_providers.length > 256) {
-      _providers.remove(_providers.keys.first);
+      final oldest = _providers.keys.first;
+      _providers.remove(oldest);
+      _resolvedProviders.remove(oldest);
     }
     return result;
   }
@@ -106,10 +163,14 @@ class CategoryCoverStore extends ChangeNotifier {
     final id = coverIdFor(group);
     if (id == null) return null;
     _providers.remove(id);
+    _resolvedProviders.remove(id);
     final image = await _images.reloadImage(id);
-    _providers[id] = Future.value(image);
+    _providers[id] = SynchronousFuture<ImageProvider?>(image);
+    _resolvedProviders[id] = image;
     while (_providers.length > 256) {
-      _providers.remove(_providers.keys.first);
+      final oldest = _providers.keys.first;
+      _providers.remove(oldest);
+      _resolvedProviders.remove(oldest);
     }
     _revision++;
     notifyListeners();
@@ -208,6 +269,7 @@ class CategoryCoverStore extends ChangeNotifier {
         // disappeared. Re-importing identical bytes restores the same content
         // id, so invalidate that negative result before publishing the record.
         _providers.remove(imported.id);
+        _resolvedProviders.remove(imported.id);
         final next = Map<String, _CategoryCoverRecord>.of(_records);
         next[group.persistenceKey] = _CategoryCoverRecord(
           kind: group.kind,
@@ -301,6 +363,7 @@ class CategoryCoverStore extends ChangeNotifier {
     final retainedImageIds =
         next.values.map((record) => record.imageId).toSet();
     _providers.removeWhere((id, _) => !retainedImageIds.contains(id));
+    _resolvedProviders.removeWhere((id, _) => !retainedImageIds.contains(id));
     _revision++;
     notifyListeners();
     if (repairKeys.isNotEmpty) {

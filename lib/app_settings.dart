@@ -18,6 +18,7 @@ import 'package:dan_player/play_service/track_resume_preferences.dart';
 import 'package:dan_player/play_service/playback_transition_preferences.dart';
 import 'package:dan_player/play_service/silence_skip_preferences.dart';
 import 'package:dan_player/lyric/japanese_reading_preferences.dart';
+import 'package:dan_player/lyric/english_phonetic_preferences.dart';
 import 'package:dan_player/player_shortcut_preferences.dart';
 import 'package:dan_player/src/rust/api/system_theme.dart';
 import 'package:dan_player/utils.dart';
@@ -161,7 +162,7 @@ Future<bool> hasPendingAppDataDirectoryChange() async {
 
 class AppSettings {
   static final github = GitHub();
-  static const String version = "26.1.2-snapshot.3";
+  static const String version = "26.1.2-snapshot.8";
   static const String appDisplayName = "Dan Player";
   static const String appDataDirectoryName = "Dan Player";
   static const String githubOwner = "DanRuguo";
@@ -288,6 +289,7 @@ class AppSettings {
       ValueNotifier(const PlaybackTransitionPreferences());
   final silenceSkipping = ValueNotifier(const SilenceSkipPreferences());
   final japaneseReadings = ValueNotifier(const JapaneseReadingPreferences());
+  final englishPhonetics = ValueNotifier(const EnglishPhoneticPreferences());
 
   /// 每 24 小时最多自动检查一次所选通道；不自动下载。
   bool autoCheckUpdates = true;
@@ -417,6 +419,8 @@ class AppSettings {
         SilenceSkipPreferences.fromJson(settingsMap['SilenceSkipping']);
     _instance.japaneseReadings.value =
         JapaneseReadingPreferences.fromJson(settingsMap['japaneseReadings']);
+    _instance.englishPhonetics.value =
+        EnglishPhoneticPreferences.fromJson(settingsMap['englishPhonetics']);
     _instance.backgrounds.value =
         BackgroundPreferences.fromMap(settingsMap['Backgrounds']);
     _instance.onlineSources.value =
@@ -631,6 +635,7 @@ class AppSettings {
         "PlaybackTransitions": playbackTransitions.value.toJson(),
         "SilenceSkipping": silenceSkipping.value.toJson(),
         "japaneseReadings": japaneseReadings.value.toJson(),
+        "englishPhonetics": englishPhonetics.value.toJson(),
         "AutoCheckUpdates": autoCheckUpdates,
         ...updateChannel.toMap(),
         "IgnoredUpdateVersion": ignoredUpdateVersion,

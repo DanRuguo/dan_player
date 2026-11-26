@@ -168,24 +168,43 @@ class _LyricCacheBatchSettingsState extends State<LyricCacheBatchSettings> {
                       padding: const EdgeInsets.only(bottom: 8),
                       child: Text(selection,
                           maxLines: 3, overflow: TextOverflow.ellipsis)),
-                Wrap(
-                    alignment: WrapAlignment.end,
-                    spacing: 8,
-                    runSpacing: 8,
+                LayoutBuilder(builder: (context, constraints) {
+                  final statusText = Text(ui(task.status));
+                  final actions = Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                            key: const ValueKey('lyric-batch-folder'),
+                            onPressed: task.running ? null : _choose,
+                            icon: const Icon(Symbols.folder_open),
+                            label: Text(ui('选择已导入的文件夹'))),
+                        if (task.running)
+                          TextButton(
+                              key: const ValueKey('lyric-batch-cancel'),
+                              onPressed: task.cancelling ? null : task.cancel,
+                              child: Text(ui('取消'))),
+                      ]);
+                  final scale = MediaQuery.textScalerOf(context).scale(1);
+                  if (constraints.maxWidth >= 480 * scale) {
+                    return Row(
+                      children: [
+                        Expanded(child: statusText),
+                        const SizedBox(width: 16),
+                        actions,
+                      ],
+                    );
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      OutlinedButton.icon(
-                          key: const ValueKey('lyric-batch-folder'),
-                          onPressed: task.running ? null : _choose,
-                          icon: const Icon(Symbols.folder_open),
-                          label: Text(ui('选择已导入的文件夹'))),
-                      if (task.running)
-                        TextButton(
-                            key: const ValueKey('lyric-batch-cancel'),
-                            onPressed: task.cancelling ? null : task.cancel,
-                            child: Text(ui('取消'))),
-                    ]),
-                const SizedBox(height: 12),
-                Text(ui(task.status)),
+                      Align(alignment: Alignment.centerRight, child: actions),
+                      const SizedBox(height: 10),
+                      statusText,
+                    ],
+                  );
+                }),
                 if (task.running) ...[
                   const SizedBox(height: 8),
                   SettingsBusyIndicator.linear(

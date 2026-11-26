@@ -1,35 +1,37 @@
-import 'package:dan_player/startup_progress.dart';
-import 'package:dan_player/font/app_font_manager.dart';
-import 'package:desktop_lyric/frame_pacing.dart';
-import 'package:dan_player/data/snapshot3_upgrade.dart';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:dan_player/app_launch_mode.dart';
 import 'package:dan_player/app_preference.dart';
-import 'package:dan_player/app_shutdown.dart';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/app_shutdown.dart';
+import 'package:dan_player/data/snapshot3_upgrade.dart';
+import 'package:dan_player/desktop_integration.dart';
 import 'package:dan_player/entry.dart';
+import 'package:dan_player/font/app_font_manager.dart';
+import 'package:dan_player/hotkeys_helper.dart';
+import 'package:dan_player/library/audio_metadata_journal.dart';
 import 'package:dan_player/library/library_data_migration.dart';
 import 'package:dan_player/library/music_folder_move.dart';
-import 'package:dan_player/page/folder_move_recovery.dart';
-import 'package:dan_player/library/audio_metadata_journal.dart';
-import 'package:dan_player/page/library_migration_recovery.dart';
-import 'package:dan_player/desktop_integration.dart';
-import 'package:dan_player/hotkeys_helper.dart';
-import 'package:dan_player/online/song_comment_association.dart';
+import 'package:dan_player/log/app_log_service.dart';
 import 'package:dan_player/online/app_network_proxy.dart';
+import 'package:dan_player/online/song_comment_association.dart';
+import 'package:dan_player/page/folder_move_recovery.dart';
+import 'package:dan_player/page/library_migration_recovery.dart';
 import 'package:dan_player/src/rust/api/logger.dart';
 import 'package:dan_player/src/rust/frb_generated.dart';
+import 'package:dan_player/startup_progress.dart';
 import 'package:dan_player/theme_provider.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/window_backdrop.dart';
 import 'package:dan_player/window_layout_controller.dart';
 import 'package:dan_player/window_mode_controller.dart';
 import 'package:dan_player/windows_shell.dart';
+import 'package:desktop_lyric/frame_pacing.dart';
+import 'package:desktop_lyric/main.dart' as desktop_lyric;
+import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:desktop_lyric/ui_language.dart';
-import 'package:desktop_lyric/main.dart' as desktop_lyric;
 
 /// Applies all native window geometry and interaction policy while the runner
 /// window is still hidden. This must complete before [runApp] can submit the
@@ -123,8 +125,33 @@ Future<void> main(List<String> arguments) => dispatchAppLaunch(
 Future<void> desktopLyricAppearanceMain(List<String> arguments) =>
     desktop_lyric.desktopLyricAppearanceMain(arguments);
 
+void _installGlobalDiagnosticHooks() {
+  final previousFlutterError = FlutterError.onError;
+  FlutterError.onError = (FlutterErrorDetails details) {
+    AppLogService.instance.record(
+      AppLogLevel.error,
+      '[flutter] ${details.exceptionAsString()}',
+      stackTrace: details.stack,
+    );
+    if (previousFlutterError != null) {
+      previousFlutterError(details);
+    } else {
+      FlutterError.presentError(details);
+    }
+  };
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    AppLogService.instance.record(
+      AppLogLevel.error,
+      '[platform] $error',
+      stackTrace: stack,
+    );
+    return true;
+  };
+}
+
 Future<void> _startMainPlayer() async {
   FramePacedWidgetsBinding();
+  _installGlobalDiagnosticHooks();
   StartupProgress.instance.begin();
   // Artwork is already decoded to physical display buckets. Keep Flutter's
   // decoded cache bounded as a second line of defence for large libraries.
@@ -135,7 +162,16 @@ Future<void> _startMainPlayer() async {
   await RustLib.init();
 
   initRustLogger().listen((msg) {
-    LOGGER.i("[rs]: $msg");
+    final trimmed = msg.trim();
+    if (trimmed.isEmpty) return;
+    final lower = trimmed.toLowerCase();
+    if (lower.startsWith('error') || lower.contains(' panic')) {
+      LOGGER.e('[rs]: $trimmed');
+    } else if (lower.startsWith('warn')) {
+      LOGGER.w('[rs]: $trimmed');
+    } else {
+      LOGGER.i('[rs]: $trimmed');
+    }
   });
 
   // Reset the single app-local shortcut dispatcher for a hot restart.
@@ -149,7 +185,8 @@ Future<void> _prepareDataAndStart() async {
   final Directory dataDirectory;
   try {
     dataDirectory = await getAppDataDir();
-  } catch (error) {
+  } catch (error, trace) {
+    LOGGER.e('[startup data dir] $error', stackTrace: trace);
     await windowManager.ensureInitialized();
     await windowManager.waitUntilReadyToShow(const WindowOptions(
         size: Size(760, 520), center: true, title: 'Dan Player'));
@@ -160,13 +197,18 @@ Future<void> _prepareDataAndStart() async {
     await showPreparedWindow();
     return;
   }
+  await AppLogService.instance.initialize(
+    dataDirectory,
+    appVersion: AppSettings.version,
+  );
   final migration = LibraryDataMigration(dataDirectory);
   try {
     await MusicFolderMove(dataDirectory).recover();
     await migration.recover();
     await AudioMetadataJournal(dataDirectory).recover();
     await Snapshot3Upgrade.prepare(dataDirectory);
-  } catch (error) {
+  } catch (error, trace) {
+    LOGGER.e('[library recovery] $error', stackTrace: trace);
     await windowManager.ensureInitialized();
     await windowManager.waitUntilReadyToShow(const WindowOptions(
         size: Size(760, 520), center: true, title: 'Dan Player · 曲库恢复'));

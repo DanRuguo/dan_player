@@ -15,6 +15,7 @@ import 'package:dan_player/statistics/app_data_storage.dart';
 import 'package:dan_player/library/personal_library.dart';
 import 'package:dan_player/statistics/player_directory_storage.dart';
 
+import 'package:dan_player/component/app_content_transition.dart';
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_horizontal_wheel_region.dart';
@@ -239,92 +240,196 @@ class _StatisticsPageState extends State<StatisticsPage> {
         _syncSnapshot();
         final stats = _displayStats;
         final library = _displaySnapshot?.library;
+        final scheme = Theme.of(context).colorScheme;
         _locateStorage();
         return ColoredBox(
-          color: Theme.of(context).colorScheme.surface,
+          color: scheme.surface,
           child: AppEntranceScope(
             child: CustomScrollView(
               slivers: [
                 SliverPadding(
                   key: const ValueKey('statistics-heading-section'),
-                  padding: const EdgeInsets.fromLTRB(24.0, 24.0, 24.0, 12.0),
+                  padding: const EdgeInsets.fromLTRB(24.0, 20.0, 24.0, 16.0),
                   sliver: SliverToBoxAdapter(
                     child: AppEntrance(
                       identity: 'statistics-heading',
                       child: StatisticsResize(
-                          child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  ui("音乐统计"),
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .headlineMedium
-                                      ?.copyWith(fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                              IconButton.filledTonal(
-                                style: IconButton.styleFrom(
-                                    foregroundColor: Theme.of(context)
-                                        .colorScheme
-                                        .onSecondaryContainer),
-                                key: const ValueKey('statistics-refresh'),
-                                tooltip: ui("刷新统计展示"),
-                                onPressed: _refreshingAll || _display.refreshing
-                                    ? null
-                                    : _refreshAll,
-                                icon: const Icon(Icons.refresh_rounded),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4.0),
-                          Text(
-                            ui("听歌习惯、曲库构成与本地文件占用。"),
-                            style: TextStyle(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
+                        child: Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                scheme.primaryContainer.withValues(alpha: 0.30),
+                                scheme.surfaceContainerLow,
+                              ],
+                            ),
+                            borderRadius: AppShape.surfaceRadius,
+                            border: Border.all(
+                              color:
+                                  scheme.outlineVariant.withValues(alpha: 0.55),
                             ),
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                              _displaySnapshot == null
-                                  ? ui('启动时准备统计展示；后台播放记录持续保存。')
-                                  : ui('展示截至 {0} · 后台持续记录，点击右上角刷新更新。', [
-                                      _snapshotClock(
-                                          _displaySnapshot!.capturedAt)
-                                    ]),
-                              key: const ValueKey('statistics-display-asof'),
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant)),
-                          if (stats.storageWarning != null) ...[
-                            const SizedBox(height: 8),
-                            Text(ui(stats.storageWarning!),
-                                style: TextStyle(
-                                    color:
-                                        Theme.of(context).colorScheme.error)),
-                          ],
-                          if (stats.legacyUnassignedCount > 0) ...[
-                            const SizedBox(height: 8),
-                            Text(ui('有 {0} 项旧版统计未明确归属；已保留总数，新的播放分别记录。',
-                                [stats.legacyUnassignedCount])),
-                          ],
-                        ],
-                      )),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Container(
+                                    width: 44,
+                                    height: 44,
+                                    decoration: BoxDecoration(
+                                      color: scheme.primary
+                                          .withValues(alpha: 0.14),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Icon(
+                                      Symbols.monitoring,
+                                      size: 24,
+                                      color: scheme.primary,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          ui("音乐统计"),
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .headlineSmall
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          ui("听歌习惯、曲库构成与本地文件占用。"),
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodyMedium
+                                              ?.copyWith(
+                                                color: scheme.onSurfaceVariant,
+                                              ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  IconButton.filledTonal(
+                                    style: IconButton.styleFrom(
+                                      foregroundColor:
+                                          scheme.onSecondaryContainer,
+                                    ),
+                                    key: const ValueKey('statistics-refresh'),
+                                    tooltip: ui("刷新统计展示"),
+                                    onPressed:
+                                        _refreshingAll || _display.refreshing
+                                            ? null
+                                            : _refreshAll,
+                                    icon: const Icon(Icons.refresh_rounded),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: scheme.surface.withValues(alpha: 0.65),
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: scheme.outlineVariant
+                                        .withValues(alpha: 0.4),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.schedule_rounded,
+                                      size: 15,
+                                      color: scheme.primary,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Flexible(
+                                      child: Text(
+                                        _displaySnapshot == null
+                                            ? ui('启动时准备统计展示；后台播放记录持续保存。')
+                                            : ui(
+                                                '展示截至 {0} · 后台持续记录，点击右上角刷新更新。',
+                                                [
+                                                  _snapshotClock(
+                                                    _displaySnapshot!.capturedAt,
+                                                  ),
+                                                ],
+                                              ),
+                                        key: const ValueKey(
+                                            'statistics-display-asof'),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color: scheme.onSurfaceVariant,
+                                            ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (stats.storageWarning != null) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  ui(stats.storageWarning!),
+                                  style: TextStyle(color: scheme.error),
+                                ),
+                              ],
+                              if (stats.legacyUnassignedCount > 0) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  ui('有 {0} 项旧版统计未明确归属；已保留总数，新的播放分别记录。', [
+                                    stats.legacyUnassignedCount,
+                                  ]),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                SliverPadding(
+                  key: const ValueKey('statistics-listening-overview-section'),
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+                  sliver: SliverToBoxAdapter(
+                    child: StatisticsResize(
+                      child: _ListeningOverviewStrip(
+                        statistics: stats,
+                        recentActivity: _recentListening,
+                      ),
+                    ),
+                  ),
+                ),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(24, 4, 24, 10),
+                  sliver: SliverToBoxAdapter(
+                    child: _ChapterHeader(
+                      title: ui('收听足迹与时段'),
+                      subtitle: ui('日历活跃热力、24 小时时段分布与周期收听趋势'),
+                      icon: Icons.insights_rounded,
                     ),
                   ),
                 ),
                 SliverPadding(
                   key: const ValueKey('statistics-calendar-section'),
-                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
                   sliver: SliverToBoxAdapter(
                     child: AppEntrance(
                       identity: 'statistics-calendar',
@@ -367,7 +472,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       child: _listeningWeekdays == null
                           ? const SizedBox.shrink()
                           : Padding(
-                              padding: const EdgeInsets.only(bottom: 20),
+                              padding: const EdgeInsets.only(bottom: 24),
                               child: AppEntrance(
                                   identity: 'statistics-weekdays',
                                   order: 2,
@@ -380,11 +485,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
                   key: const ValueKey('statistics-library-heading-section'),
                   padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
                   sliver: SliverToBoxAdapter(
-                    child: Text(
-                      ui("曲库概览"),
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                    child: _ChapterHeader(
+                      title: ui("曲库概览"),
+                      subtitle: ui("本地与联网曲目规模、核实字节占用及目录格式分布"),
+                      icon: Symbols.library_music,
                     ),
                   ),
                 ),
@@ -401,42 +505,88 @@ class _StatisticsPageState extends State<StatisticsPage> {
                   padding: const EdgeInsets.fromLTRB(24.0, 12.0, 24.0, 0.0),
                   sliver: SliverToBoxAdapter(
                     child: StatisticsResize(
-                        child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (_display.refreshing) ...[
-                          LinearProgressIndicator(
-                            value: _display.total == 0
-                                ? AppMotion.enabled(
-                                        context, MotionKind.feedback)
-                                    ? null
-                                    : 0
-                                : _display.completed / _display.total,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(ui("正在核实曲库 {0} / {1}…",
-                              [_display.completed, _display.total])),
-                        ] else if (_display.failure != null)
-                          Text(
-                            ui("暂时无法完成统计，请重试。已有结果会保留。"),
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.error,
-                            ),
-                          )
-                        else if (library != null)
-                          Text(
-                            ui("统计于 {0} · 按源文件字节数统计，不含缓存或磁盘分配开销。{1}", [
-                              _clock(library.scannedAt),
-                              library.duplicateEntries == 0
-                                  ? ''
-                                  : ' ${ui('已合并 {0} 条重复记录。', [
-                                          library.duplicateEntries
-                                        ])}'
-                            ]),
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                      ],
-                    )),
+                        child: (_display.refreshing ||
+                                _display.failure != null ||
+                                library != null)
+                            ? Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: scheme.surfaceContainerLow,
+                                  borderRadius: AppShape.controlRadius,
+                                  border: Border.all(
+                                    color: scheme.outlineVariant
+                                        .withValues(alpha: 0.45),
+                                  ),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (_display.refreshing) ...[
+                                      ClipRRect(
+                                        borderRadius:
+                                            BorderRadius.circular(999),
+                                        child: LinearProgressIndicator(
+                                          minHeight: 5,
+                                          value: _display.total == 0
+                                              ? AppMotion.enabled(context,
+                                                      MotionKind.feedback)
+                                                  ? null
+                                                  : 0
+                                              : _display.completed /
+                                                  _display.total,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(ui("正在核实曲库 {0} / {1}…", [
+                                        _display.completed,
+                                        _display.total,
+                                      ])),
+                                    ] else if (_display.failure != null)
+                                      Text(
+                                        ui("暂时无法完成统计，请重试。已有结果会保留。"),
+                                        style: TextStyle(color: scheme.error),
+                                      )
+                                    else if (library != null)
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.verified_outlined,
+                                            size: 16,
+                                            color: scheme.primary,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              ui(
+                                                  "统计于 {0} · 按源文件字节数统计，不含缓存或磁盘分配开销。{1}",
+                                                  [
+                                                    _clock(library.scannedAt),
+                                                    library.duplicateEntries ==
+                                                            0
+                                                        ? ''
+                                                        : ' ${ui('已合并 {0} 条重复记录。', [
+                                                                library
+                                                                    .duplicateEntries
+                                                              ])}'
+                                                  ]),
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.copyWith(
+                                                    color:
+                                                        scheme.onSurfaceVariant,
+                                                  ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                  ],
+                                ),
+                              )
+                            : const SizedBox.shrink()),
                   ),
                 ),
                 SliverPadding(
@@ -494,34 +644,61 @@ class _StatisticsPageState extends State<StatisticsPage> {
                 ),
                 SliverPadding(
                   key: const ValueKey('statistics-ranking-selector-section'),
-                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                  padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
                   sliver: SliverToBoxAdapter(
-                      child: StatisticsResize(
-                          child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                        Wrap(spacing: 8, runSpacing: 8, children: [
-                          for (final item in [
-                            ('tracks', '歌曲'),
-                            ('artists', '艺术家'),
-                            ('albums', '专辑')
-                          ])
-                            ChoiceChip(
-                                key: ValueKey('statistics-ranking-${item.$1}'),
-                                label: Text(ui(item.$2)),
-                                selected: _rankingGroup == item.$1,
-                                onSelected: (selected) {
-                                  if (selected) {
-                                    setState(() => _rankingGroup = item.$1);
-                                  }
-                                }),
-                        ]),
-                        if (_rankingGroup != 'tracks') ...[
-                          const SizedBox(height: 8),
-                          Text(ui('按已明确归属的历史记录汇总；同名专辑按艺术家区分。'),
-                              style: Theme.of(context).textTheme.bodySmall),
+                    child: StatisticsResize(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          StatisticsCardHeader(
+                            title: _ChapterHeader(
+                              title: ui('收听偏好排行'),
+                              subtitle: ui('按播放次数与累计收听时长汇总 Top 10'),
+                              icon: Icons.workspace_premium_outlined,
+                            ),
+                            controls: _StatisticsPillSegmented<String>(
+                              value: _rankingGroup,
+                              options: [
+                                (
+                                  value: 'tracks',
+                                  label: ui('歌曲'),
+                                  icon: Icons.music_note_outlined,
+                                  key: const ValueKey(
+                                      'statistics-ranking-tracks'),
+                                ),
+                                (
+                                  value: 'artists',
+                                  label: ui('艺术家'),
+                                  icon: Icons.person_outline_rounded,
+                                  key: const ValueKey(
+                                      'statistics-ranking-artists'),
+                                ),
+                                (
+                                  value: 'albums',
+                                  label: ui('专辑'),
+                                  icon: Icons.album_outlined,
+                                  key: const ValueKey(
+                                      'statistics-ranking-albums'),
+                                ),
+                              ],
+                              onChanged: (next) =>
+                                  setState(() => _rankingGroup = next),
+                            ),
+                          ),
+                          if (_rankingGroup != 'tracks') ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              ui('按已明确归属的历史记录汇总；同名专辑按艺术家区分。'),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: scheme.onSurfaceVariant),
+                            ),
+                          ],
                         ],
-                      ]))),
+                      ),
+                    ),
+                  ),
                 ),
                 SliverPadding(
                   key: const ValueKey('statistics-rankings-section'),
@@ -535,6 +712,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                             title: ui("播放最多"),
                             icon: Symbols.play_circle,
                             tracks: rankings.play,
+                            groupKey: _rankingGroup,
                             grouped: _rankingGroup != 'tracks',
                             value: (item) => ui("{0} 次", [item.playCount]),
                             magnitude: (item) => item.playCount.toDouble(),
@@ -543,6 +721,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                             title: ui("收听最久"),
                             icon: Symbols.headphones,
                             tracks: rankings.time,
+                            groupKey: _rankingGroup,
                             grouped: _rankingGroup != 'tracks',
                             value: (item) => _formatListeningDuration(
                                 item.listenMilliseconds),
@@ -656,73 +835,129 @@ class _DailyListeningDistributionState
       key: const ValueKey('statistics-daily-distribution'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          ChoiceChip(
-              key: const ValueKey('statistics-hours-recent'),
-              label: Text(ui('最近24小时')),
-              selected: !_history,
-              onSelected: (_) => setState(() => _history = false)),
-          ChoiceChip(
-              key: const ValueKey('statistics-hours-history'),
-              label: Text(ui('历史时段分布')),
-              selected: _history,
-              onSelected: (_) => setState(() => _history = true)),
-        ]),
-        if (_history) ...[
-          const SizedBox(height: 12),
-          Text(ui('全部历史记录'), style: Theme.of(context).textTheme.labelMedium),
-          const SizedBox(height: 6),
-          Wrap(spacing: 18, runSpacing: 6, children: [
-            Text(ui("完整 {0} 次", [widget.statistics.totalCompletedCount])),
-            Text(ui("提前跳过 {0} 次", [widget.statistics.totalSkippedCount])),
-          ]),
-        ] else ...[
-          const SizedBox(height: 12),
-          Tooltip(
-              message: ui('按最近24小时已记录的连续收听片段计算；暂停或缺失的间隔不连接、不补算。'),
-              child: Text(
-                  ui('最长连续收听：{0}', [
-                    recent.recordedSince == null
-                        ? '—'
-                        : '${recent.complete ? '' : '≥ '}${_formatListeningDuration(recent.longestIntervalMilliseconds, precise: true)}'
-                  ]),
-                  key: const ValueKey('statistics-longest-listening-interval'),
-                  style: Theme.of(context).textTheme.labelMedium)),
-        ],
-        const SizedBox(height: 16),
-        _StatisticsHeading(
-          title: ui("24 小时收听分布"),
-          icon: Symbols.bar_chart,
-        ),
-        const SizedBox(height: 4),
-        Text(
-          ui(_history
-              ? "每根柱表示该时段累计收听时长，强调色柱为最高时段。"
-              : "每根柱表示最近24小时内一个小时的收听时长；日期和时刻随展示快照固定。"),
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
+        StatisticsCardHeader(
+          title: _StatisticsHeading(
+            title: ui("24 小时收听分布"),
+            icon: Symbols.bar_chart,
+          ),
+          controls: _StatisticsPillSegmented<bool>(
+            value: _history,
+            options: [
+              (
+                value: false,
+                label: ui('最近24小时'),
+                icon: Icons.schedule_rounded,
+                key: const ValueKey('statistics-hours-recent'),
               ),
+              (
+                value: true,
+                label: ui('历史时段分布'),
+                icon: Icons.history_rounded,
+                key: const ValueKey('statistics-hours-history'),
+              ),
+            ],
+            onChanged: (next) => setState(() => _history = next),
+          ),
         ),
-        const SizedBox(height: 16),
-        HourlyListeningChart(
-          key: ValueKey(_history),
-          values: _history
-              ? List<int>.of(widget.statistics.hourlyMilliseconds)
-              : recent.hourlyMilliseconds,
-          peakHours:
-              _history ? widget.statistics.mostActiveHours : recent.peakHours,
-          labels: _history
-              ? null
-              : [
-                  for (var i = 0; i < 24; i++)
-                    '${recent.hourStart(i).hour.toString().padLeft(2, '0')}:${recent.hourStart(i).minute.toString().padLeft(2, '0')}'
-                ],
-          ranges: _history
-              ? null
-              : [
-                  for (var i = 0; i < 24; i++)
-                    '${stamp(recent.hourStart(i))} – ${stamp(recent.hourStart(i + 1))}'
-                ],
+        const SizedBox(height: 10),
+        AppContentTransition(
+          identity: _history,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerLowest.withValues(alpha: 0.65),
+                  borderRadius: AppShape.smallRadius,
+                  border: Border.all(
+                    color: scheme.outlineVariant.withValues(alpha: 0.4),
+                  ),
+                ),
+                child: _history
+                    ? Wrap(
+                        spacing: 16,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            ui('全部历史记录'),
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelMedium
+                                ?.copyWith(
+                                  color: scheme.primary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                          Text(ui("完整 {0} 次",
+                              [widget.statistics.totalCompletedCount])),
+                          Text(ui("提前跳过 {0} 次",
+                              [widget.statistics.totalSkippedCount])),
+                        ],
+                      )
+                    : Tooltip(
+                        message: ui('按最近24小时已记录的连续收听片段计算；暂停或缺失的间隔不连接、不补算。'),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.bolt_rounded,
+                                size: 16, color: scheme.primary),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                ui('最长连续收听：{0}', [
+                                  recent.recordedSince == null
+                                      ? '—'
+                                      : '${recent.complete ? '' : '≥ '}${_formatListeningDuration(recent.longestIntervalMilliseconds, precise: true)}'
+                                ]),
+                                key: const ValueKey(
+                                    'statistics-longest-listening-interval'),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelMedium
+                                    ?.copyWith(fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                ui(_history
+                    ? "每根柱表示该时段累计收听时长，强调色柱为最高时段。"
+                    : "每根柱表示最近24小时内一个小时的收听时长；日期和时刻随展示快照固定。"),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: 14),
+              HourlyListeningChart(
+                key: ValueKey(_history),
+                modernChrome: true,
+                values: _history
+                    ? List<int>.of(widget.statistics.hourlyMilliseconds)
+                    : recent.hourlyMilliseconds,
+                peakHours: _history
+                    ? widget.statistics.mostActiveHours
+                    : recent.peakHours,
+                labels: _history
+                    ? null
+                    : [
+                        for (var i = 0; i < 24; i++)
+                          '${recent.hourStart(i).hour.toString().padLeft(2, '0')}:${recent.hourStart(i).minute.toString().padLeft(2, '0')}'
+                      ],
+                ranges: _history
+                    ? null
+                    : [
+                        for (var i = 0; i < 24; i++)
+                          '${stamp(recent.hourStart(i))} – ${stamp(recent.hourStart(i + 1))}'
+                      ],
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 12),
         Text(
@@ -742,12 +977,14 @@ class HourlyListeningChart extends StatefulWidget {
       required this.values,
       required this.peakHours,
       this.labels,
-      this.ranges});
+      this.ranges,
+      this.modernChrome = false});
 
   final List<int> values;
   final List<int> peakHours;
   final List<String>? labels;
   final List<String>? ranges;
+  final bool modernChrome;
 
   @override
   State<HourlyListeningChart> createState() => _HourlyListeningChartState();
@@ -874,6 +1111,7 @@ class _HourlyListeningChartState extends State<HourlyListeningChart> {
                               child: CustomPaint(
                                 painter: _HourlyGridPainter(
                                   color: scheme.outlineVariant,
+                                  soft: widget.modernChrome,
                                 ),
                               ),
                             ),
@@ -1031,7 +1269,7 @@ class _HourlyListeningChartState extends State<HourlyListeningChart> {
           builder: (context, _, __) {
             final selectedHour = _visibleSelection;
             final selectedIsPeak = widget.peakHours.contains(selectedHour);
-            return Row(
+            final navRow = Row(
               children: [
                 IconButton(
                   tooltip: ui("前一个时段"),
@@ -1086,6 +1324,18 @@ class _HourlyListeningChartState extends State<HourlyListeningChart> {
                   icon: const Icon(Icons.chevron_right_rounded),
                 ),
               ],
+            );
+            if (!widget.modernChrome) return navRow;
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerLowest.withValues(alpha: 0.65),
+                borderRadius: AppShape.controlRadius,
+                border: Border.all(
+                  color: scheme.outlineVariant.withValues(alpha: 0.4),
+                ),
+              ),
+              child: navRow,
             );
           },
         ),
@@ -1530,27 +1780,23 @@ class _FolderStorageCard extends StatelessWidget {
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              ChoiceChip(
+          _StatisticsPillSegmented<FolderDistributionMetric>(
+            value: metric,
+            options: [
+              (
+                value: FolderDistributionMetric.songCount,
+                label: ui("歌曲数量"),
+                icon: Icons.music_note_outlined,
                 key: const ValueKey('folder-metric-count'),
-                label: Text(ui("歌曲数量")),
-                selected: byCount,
-                onSelected: (_) =>
-                    onMetricChanged(FolderDistributionMetric.songCount),
-                materialTapTargetSize: MaterialTapTargetSize.padded,
               ),
-              ChoiceChip(
+              (
+                value: FolderDistributionMetric.storageBytes,
+                label: ui("占用空间"),
+                icon: Icons.data_usage_rounded,
                 key: const ValueKey('folder-metric-bytes'),
-                label: Text(ui("占用空间")),
-                selected: !byCount,
-                onSelected: (_) =>
-                    onMetricChanged(FolderDistributionMetric.storageBytes),
-                materialTapTargetSize: MaterialTapTargetSize.padded,
               ),
             ],
+            onChanged: onMetricChanged,
           ),
           const SizedBox(height: 12),
           StatisticsDistributionView(
@@ -1639,29 +1885,62 @@ class _MetricCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return _StatisticsCard(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 112),
+        constraints: const BoxConstraints(minHeight: 118),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            _StatisticsHeading(title: label, icon: icon),
-            const SizedBox(height: 10),
+            Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, size: 19, color: scheme.primary),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Semantics(
+                    header: true,
+                    child: Text(
+                      label,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
             FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
               child: Text(
                 value,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: scheme.onSurface,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               detail,
-              style: Theme.of(context).textTheme.bodySmall,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
@@ -1681,11 +1960,258 @@ class _StatisticsCard extends StatelessWidget {
     return Card.filled(
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
-          borderRadius: AppShape.controlRadius,
+          borderRadius: AppShape.surfaceRadius,
           side:
-              BorderSide(color: scheme.outlineVariant.withValues(alpha: .55))),
+              BorderSide(color: scheme.outlineVariant.withValues(alpha: .5))),
       color: scheme.surfaceContainerLow,
       child: Padding(padding: const EdgeInsets.all(18), child: child),
+    );
+  }
+}
+
+class _ChapterHeader extends StatelessWidget {
+  const _ChapterHeader({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Semantics(
+      header: true,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: scheme.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 19, color: scheme.primary),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ListeningOverviewStrip extends StatelessWidget {
+  const _ListeningOverviewStrip({
+    required this.statistics,
+    required this.recentActivity,
+  });
+
+  final PlaybackStatistics statistics;
+  final RecentListeningActivity? recentActivity;
+
+  @override
+  Widget build(BuildContext context) {
+    UiLanguageScope.watch(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final effectiveWidth =
+            constraints.maxWidth / _statisticsTextScale(context);
+        final activeDays = statistics.dailyMilliseconds.values
+            .where((ms) => ms > 0)
+            .length;
+        final recentTotalMs = recentActivity == null
+            ? 0
+            : recentActivity!.hourlyMilliseconds
+                .fold<int>(0, (sum, v) => sum + math.max(0, v));
+        final peakHours = statistics.mostActiveHours;
+        final peakLabel =
+            peakHours.isEmpty ? '—' : _hourRange(peakHours.first);
+        final peakMs = peakHours.isEmpty
+            ? 0
+            : statistics.hourlyMilliseconds[peakHours.first];
+        return StatisticsEqualHeightRows(
+          columns:
+              effectiveWidth >= 1000 ? 4 : (effectiveWidth >= 470 ? 2 : 1),
+          spacing: 12,
+          children: [
+            _MetricCard(
+              key: const ValueKey('statistics-total-listen-metric'),
+              icon: Symbols.headphones,
+              label: ui('累计收听时长'),
+              value: _formatListeningDuration(statistics.totalListenMilliseconds),
+              detail: ui('活跃收听 {0} 天', [activeDays]),
+            ),
+            _MetricCard(
+              key: const ValueKey('statistics-play-count-metric'),
+              icon: Symbols.play_circle,
+              label: ui('累计播放次数'),
+              value: ui('{0} 次', [statistics.totalPlayCount]),
+              detail: ui('完整 {0} · 跳过 {1}', [
+                statistics.totalCompletedCount,
+                statistics.totalSkippedCount,
+              ]),
+            ),
+            _MetricCard(
+              key: const ValueKey('statistics-recent24h-metric'),
+              icon: Icons.bolt_rounded,
+              label: ui('近24小时收听'),
+              value: _formatListeningDuration(recentTotalMs),
+              detail: recentActivity?.recordedSince == null
+                  ? ui('等待记录连续收听片段')
+                  : ui('最长连续 {0}', [
+                      _formatListeningDuration(
+                        recentActivity!.longestIntervalMilliseconds,
+                      ),
+                    ]),
+            ),
+            _MetricCard(
+              key: const ValueKey('statistics-peak-hour-metric'),
+              icon: Icons.wb_twilight_rounded,
+              label: ui('常听高峰时段'),
+              value: peakLabel,
+              detail: peakHours.isEmpty
+                  ? ui('开始收听后自动统计')
+                  : ui('该时段累计 {0}', [_formatListeningDuration(peakMs)]),
+            ),
+          ]
+              .indexed
+              .map(
+                (entry) => AppEntrance(
+                  identity: ('statistics-overview-metric', entry.$1),
+                  order: entry.$1 + 1,
+                  child: entry.$2,
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+typedef _PillOption<T> = ({
+  T value,
+  String label,
+  IconData icon,
+  Key? key,
+});
+
+class _StatisticsPillSegmented<T> extends StatelessWidget {
+  const _StatisticsPillSegmented({
+    super.key,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
+
+  final T value;
+  final List<_PillOption<T>> options;
+  final ValueChanged<T> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final duration = AppMotion.duration(
+      context,
+      MotionKind.feedback,
+      AppMotion.quick,
+    );
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: 0.45),
+        ),
+      ),
+      child: Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        children: [
+          for (final item in options)
+            Semantics(
+              key: item.key,
+              button: true,
+              selected: item.value == value,
+              child: AnimatedContainer(
+                duration: duration,
+                curve: AppMotion.standardCurve,
+                decoration: BoxDecoration(
+                  color: item.value == value
+                      ? scheme.primaryContainer
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: InkWell(
+                    onTap: () {
+                      if (item.value != value) onChanged(item.value);
+                    },
+                    borderRadius: BorderRadius.circular(9),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 11,
+                        vertical: 6,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            item.icon,
+                            size: 16,
+                            color: item.value == value
+                                ? scheme.onPrimaryContainer
+                                : scheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            item.label,
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: item.value == value
+                                  ? scheme.onPrimaryContainer
+                                  : scheme.onSurface,
+                              fontWeight: item.value == value
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -1760,45 +2286,55 @@ class _LargestStorageCardState extends State<_LargestStorageCard> {
       icon: Symbols.hard_drive,
       headerControls: Semantics(
         label: ui('占用空间分组'),
-        child: Wrap(
+        child: _StatisticsPillSegmented<String>(
           key: const ValueKey('statistics-storage-group'),
-          alignment: WrapAlignment.end,
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final item in [
-              ('tracks', '歌曲'),
-              ('albums', '专辑'),
-              ('artists', '艺术家'),
-            ])
-              ChoiceChip(
-                key: ValueKey('statistics-storage-group-${item.$1}'),
-                label: Text(ui(item.$2)),
-                selected: _group == item.$1,
-                onSelected: (selected) {
-                  if (selected) setState(() => _group = item.$1);
-                },
-              ),
+          value: _group,
+          options: [
+            (
+              value: 'tracks',
+              label: ui('歌曲'),
+              icon: Icons.music_note_outlined,
+              key: const ValueKey('statistics-storage-group-tracks'),
+            ),
+            (
+              value: 'albums',
+              label: ui('专辑'),
+              icon: Icons.album_outlined,
+              key: const ValueKey('statistics-storage-group-albums'),
+            ),
+            (
+              value: 'artists',
+              label: ui('艺术家'),
+              icon: Icons.person_outline_rounded,
+              key: const ValueKey('statistics-storage-group-artists'),
+            ),
           ],
+          onChanged: (next) => setState(() => _group = next),
         ),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        if (rows.isEmpty) Text(ui('暂无可统计的文件')),
-        for (final (index, row) in rows.indexed)
-          StatisticsBarRow(
-              label: row.label,
-              wrapLabel: true,
-              detail: row.detail,
-              valueLabel: values[index],
-              valueColumnWidth: valueWidth,
-              value: row.bytes.toDouble(),
-              maximum: maximum),
-        if (_group != 'tracks') ...[
-          const SizedBox(height: 8),
-          Text(ui('汇总全部已核实文件；同名专辑按艺术家区分，合作艺术家按完整署名统计。'),
-              style: Theme.of(context).textTheme.bodySmall),
-        ],
-      ]),
+      child: AppContentTransition(
+        identity: _group,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (rows.isEmpty) Text(ui('暂无可统计的文件')),
+          for (final (index, row) in rows.indexed)
+            StatisticsBarRow(
+                rank: index + 1,
+                label: row.label,
+                wrapLabel: true,
+                detail: row.detail,
+                showDetailSubtitle: true,
+                animateBar: true,
+                valueLabel: values[index],
+                valueColumnWidth: valueWidth,
+                value: row.bytes.toDouble(),
+                maximum: maximum),
+          if (_group != 'tracks') ...[
+            const SizedBox(height: 8),
+            Text(ui('汇总全部已核实文件；同名专辑按艺术家区分，合作艺术家按完整署名统计。'),
+                style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ]),
+      ),
     );
   }
 }
@@ -1843,8 +2379,10 @@ class _RankingCard extends StatelessWidget {
       required this.tracks,
       required this.value,
       required this.magnitude,
+      required this.groupKey,
       this.grouped = false});
   final bool grouped;
+  final String groupKey;
   final String title;
   final IconData icon;
   final List<TrackPlaybackStatistics> tracks;
@@ -1860,39 +2398,45 @@ class _RankingCard extends StatelessWidget {
     return _SectionCard(
         title: title,
         icon: icon,
-        child: tracks.isEmpty
-            ? Padding(
-                padding: const EdgeInsets.symmetric(vertical: 28),
-                child: Center(child: Text(ui("播放歌曲后会在这里生成排行"))))
-            : Column(children: [
-                for (final (index, track) in tracks.indexed)
-                  StatisticsBarRow(
-                      label: grouped && track.artist.isNotEmpty
-                          ? '${track.title} · ${track.artist}'
-                          : track.title,
-                      detail: grouped
-                          ? track.artist
-                          : '${track.artist} · ${ui(track.online ? "联网" : "本地")}'
-                              '${track.legacyUnassigned ? " · ${ui('旧版未明确归属 · {0} 个候选', [
-                                      track.candidateTrackIds.length
-                                    ])}" : ""}',
-                      rank: index + 1,
-                      valueColumnWidth: valueWidth,
-                      valueLabel: values[index],
-                      value: magnitude(track),
-                      maximum: maximum),
-              ]));
+        child: AppContentTransition(
+          identity: groupKey,
+          child: tracks.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 28),
+                  child: Center(child: Text(ui("播放歌曲后会在这里生成排行"))))
+              : Column(children: [
+                  for (final (index, track) in tracks.indexed)
+                    StatisticsBarRow(
+                        label: grouped && track.artist.isNotEmpty
+                            ? '${track.title} · ${track.artist}'
+                            : track.title,
+                        detail: grouped
+                            ? track.artist
+                            : '${track.artist} · ${ui(track.online ? "联网" : "本地")}'
+                                '${track.legacyUnassigned ? " · ${ui('旧版未明确归属 · {0} 个候选', [
+                                        track.candidateTrackIds.length
+                                      ])}" : ""}',
+                        showDetailSubtitle: true,
+                        animateBar: true,
+                        rank: index + 1,
+                        valueColumnWidth: valueWidth,
+                        valueLabel: values[index],
+                        value: magnitude(track),
+                        maximum: maximum),
+                ]),
+        ));
   }
 }
 
 class _HourlyGridPainter extends CustomPainter {
-  const _HourlyGridPainter({required this.color});
+  const _HourlyGridPainter({required this.color, this.soft = false});
   final Color color;
+  final bool soft;
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = color.withValues(alpha: 0.7)
+      ..color = color.withValues(alpha: soft ? 0.25 : 0.7)
       ..strokeWidth = 1;
     for (var line = 0; line <= 3; line++) {
       final y = size.height * line / 3;
@@ -1906,5 +2450,5 @@ class _HourlyGridPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _HourlyGridPainter oldDelegate) =>
-      oldDelegate.color != color;
+      oldDelegate.color != color || oldDelegate.soft != soft;
 }

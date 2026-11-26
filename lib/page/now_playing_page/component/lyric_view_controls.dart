@@ -19,6 +19,9 @@ import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/lyric/japanese_lyric_readings.dart';
 import 'package:dan_player/lyric/japanese_reading_analyzer.dart';
 import 'package:dan_player/lyric/japanese_reading_preferences.dart';
+import 'package:dan_player/lyric/english_lyric_phonetics.dart';
+import 'package:dan_player/lyric/english_phonetic_preferences.dart';
+import 'package:desktop_lyric/app_motion.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/component/lyric_editor_dialog.dart';
 import 'package:dan_player/component/lyric_workbench_dialog.dart';
@@ -54,6 +57,7 @@ class LyricViewController extends ChangeNotifier {
       {NowPlayingPagePreference? preferences,
       ValueNotifier<DesktopLyricAppearance>? appearance,
       ValueNotifier<JapaneseReadingPreferences>? japaneseReadings,
+      ValueNotifier<EnglishPhoneticPreferences>? englishPhonetics,
       Future<void> Function()? persistAppearance,
       Future<void> Function()? persistPreferences})
       : nowPlayingPagePref =
@@ -61,6 +65,8 @@ class LyricViewController extends ChangeNotifier {
         _appearance = appearance ?? AppSettings.instance.desktopLyricAppearance,
         _japaneseReadings =
             japaneseReadings ?? AppSettings.instance.japaneseReadings,
+        _englishPhonetics =
+            englishPhonetics ?? AppSettings.instance.englishPhonetics,
         _persistPreferences = persistPreferences ??
             (() => AppPreference.instance.save(throwOnError: true)),
         _persistAppearance = persistAppearance ??
@@ -68,11 +74,13 @@ class LyricViewController extends ChangeNotifier {
                 .saveSettings(throwOnError: true, captureWindowSize: false)) {
     _letterSpacing = _appearance.value.lyricLetterSpacing;
     _showJapaneseReading = _appearance.value.showJapaneseReading;
+    _showEnglishPhonetics = _appearance.value.showEnglishPhonetics;
     _appearance.addListener(_appearanceChanged);
   }
   final NowPlayingPagePreference nowPlayingPagePref;
   final ValueNotifier<DesktopLyricAppearance> _appearance;
   final ValueNotifier<JapaneseReadingPreferences> _japaneseReadings;
+  final ValueNotifier<EnglishPhoneticPreferences> _englishPhonetics;
   final Future<void> Function() _persistAppearance;
   final Future<void> Function() _persistPreferences;
   Future<void> _blurPreferenceWrite = Future<void>.value();
@@ -85,17 +93,29 @@ class LyricViewController extends ChangeNotifier {
   late bool _showJapaneseReading;
   bool get showJapaneseReading => _showJapaneseReading;
   int _japaneseReadingVisibilityRevision = 0;
+  late bool _showEnglishPhonetics;
+  bool get showEnglishPhonetics => _showEnglishPhonetics;
+  int _englishPhoneticsVisibilityRevision = 0;
 
   void _appearanceChanged() {
     final next = _appearance.value.lyricLetterSpacing;
     final reading = _appearance.value.showJapaneseReading;
+    final english = _appearance.value.showEnglishPhonetics;
     if (_disposed ||
-        (next == _letterSpacing && reading == _showJapaneseReading)) return;
+        (next == _letterSpacing &&
+            reading == _showJapaneseReading &&
+            english == _showEnglishPhonetics)) {
+      return;
+    }
     _letterSpacing = next;
     if (reading != _showJapaneseReading) {
       _japaneseReadingVisibilityRevision++;
     }
+    if (english != _showEnglishPhonetics) {
+      _englishPhoneticsVisibilityRevision++;
+    }
     _showJapaneseReading = reading;
+    _showEnglishPhonetics = english;
     notifyListeners();
   }
 
@@ -117,6 +137,24 @@ class LyricViewController extends ChangeNotifier {
   }
 
   Future<void> persistJapaneseReadingVisibility() => _persistAppearance();
+
+  void setShowEnglishPhonetics(bool value) {
+    if (_disposed || value == showEnglishPhonetics) return;
+    _appearance.value = _appearance.value.copyWith(showEnglishPhonetics: value);
+  }
+
+  void toggleEnglishPhonetics() =>
+      setShowEnglishPhonetics(!showEnglishPhonetics);
+
+  void toggleEnglishPhoneticGeneration() {
+    if (_disposed) return;
+    setEnglishPhoneticGeneration(
+        preferences: _englishPhonetics,
+        appearance: _appearance,
+        enabled: !showEnglishPhonetics);
+  }
+
+  Future<void> persistEnglishPhoneticsVisibility() => _persistAppearance();
 
   void setLyricLetterSpacing(double value) {
     if (_disposed || !value.isFinite) return;
@@ -484,6 +522,44 @@ class _LyricReadingMenu extends StatelessWidget {
     showJapaneseReadingResultNotice(navigator.context, result);
   }
 
+  Future<void> _toggleEnglishPhonetics(NavigatorState navigator,
+      BuildContext ownerContext, LyricViewController controller) async {
+    final service = PlayService.instance.lyricService;
+    final generation = service.resolutionGeneration;
+    final source = service.rawCurrentLyric;
+    controller.toggleEnglishPhoneticGeneration();
+    if (!controller.showEnglishPhonetics) {
+      service.cancelEnglishPhoneticsForCurrentTrack(
+          expectedGeneration: generation);
+    }
+    final visibilityRevision = controller._englishPhoneticsVisibilityRevision;
+    bool actionOwns() =>
+        !controller._disposed &&
+        ownerContext.mounted &&
+        navigator.mounted &&
+        visibilityRevision == controller._englishPhoneticsVisibilityRevision &&
+        generation == service.resolutionGeneration &&
+        identical(source, service.rawCurrentLyric);
+    bool owns() => actionOwns() && controller.showEnglishPhonetics;
+    try {
+      await controller.persistEnglishPhoneticsVisibility();
+    } catch (_) {
+      if (navigator.mounted && actionOwns()) {
+        showAppNotice(ui('设置保存失败，请重试'),
+            context: navigator.context, kind: AppNoticeKind.error);
+      }
+    }
+    if (!owns()) return;
+    final result = await service.ensureEnglishPhoneticsForCurrentTrack(
+        expectedGeneration: generation);
+    if (!navigator.mounted ||
+        !owns() ||
+        result == EnglishPhoneticResult.stale) {
+      return;
+    }
+    showEnglishPhoneticResultNotice(navigator.context, result);
+  }
+
   Future<void> _practiceSegment(NavigatorState navigator) async {
     if (!navigator.mounted) return;
     final playback = PlayService.instance.playbackService;
@@ -546,6 +622,8 @@ class _LyricReadingMenu extends StatelessWidget {
     final album = audio.album;
     final translation = controller.showTranslation;
     final romanization = controller.showRomanization;
+    final japaneseReading = controller.showJapaneseReading;
+    final englishPhonetic = controller.showEnglishPhonetics;
     final timestamp = controller.showTimestamps;
     try {
       final lyric = await future;
@@ -562,6 +640,8 @@ class _LyricReadingMenu extends StatelessWidget {
               project: (line) => lyricReadingText(line,
                   translation: translation,
                   romanization: romanization,
+                  japaneseReading: japaneseReading,
+                  englishPhonetic: englishPhonetic,
                   timestamp: timestamp && lyric is! PlainLyric));
       if (selection.lines.isEmpty) {
         showAppNotice(ui('没有可制作卡片的歌词'), context: navigator.context);
@@ -605,6 +685,10 @@ class _LyricReadingMenu extends StatelessWidget {
             _toggleJapaneseReadings(navigator, context, controller),
         japaneseReadingsBusy:
             PlayService.instance.lyricService.japaneseReadingsBusy,
+        onToggleEnglishPhonetics: (navigator) =>
+            _toggleEnglishPhonetics(navigator, context, controller),
+        englishPhoneticsBusy:
+            PlayService.instance.lyricService.englishPhoneticsBusy,
         onPracticeSegment: _practiceSegment);
   }
 }
@@ -714,16 +798,36 @@ class _LyricAlignSwitchBtn extends StatelessWidget {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
     final lyricViewController = context.watch<LyricViewController>();
+    final align = lyricViewController.lyricTextAlign;
 
     return IconButton(
       onPressed: lyricViewController.switchLyricTextAlign,
       tooltip: ui("切换歌词对齐方向"),
       color: scheme.primary,
-      icon: Icon(switch (lyricViewController.lyricTextAlign) {
-        LyricTextAlign.left => Symbols.format_align_left,
-        LyricTextAlign.center => Symbols.format_align_center,
-        LyricTextAlign.right => Symbols.format_align_right,
-      }),
+      icon: AnimatedSwitcher(
+        duration: AppMotion.duration(
+          context,
+          MotionKind.feedback,
+          AppMotion.quick,
+        ),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (child, animation) => FadeTransition(
+          opacity: animation,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: .84, end: 1).animate(animation),
+            child: child,
+          ),
+        ),
+        child: Icon(
+          key: ValueKey(align),
+          switch (align) {
+            LyricTextAlign.left => Symbols.format_align_left,
+            LyricTextAlign.center => Symbols.format_align_center,
+            LyricTextAlign.right => Symbols.format_align_right,
+          },
+        ),
+      ),
     );
   }
 }

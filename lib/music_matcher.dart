@@ -175,11 +175,20 @@ String canonicalSongTitleForMatch(String value) {
   return title.isEmpty ? value.trim() : title;
 }
 
+String _effectiveMatchArtist(Audio audio) {
+  if (_meaningfulMatchValue(audio.artist)) return audio.artist.trim();
+  final albumArtist = audio.albumArtist;
+  if (albumArtist != null && _meaningfulMatchValue(albumArtist)) {
+    return albumArtist.trim();
+  }
+  return '';
+}
+
 String songMatchSearchQuery(Audio audio) {
   final rawTitle =
       _meaningfulMatchValue(audio.title) ? audio.title : audio.fileNameTitle;
   final title = canonicalSongTitleForMatch(rawTitle);
-  final artist = _meaningfulMatchValue(audio.artist) ? audio.artist.trim() : '';
+  final artist = _effectiveMatchArtist(audio);
   return [title, if (artist.isNotEmpty) artist].join(' ').trim();
 }
 
@@ -211,7 +220,23 @@ String normalizeSongMatchText(String value) {
 bool _meaningfulMatchValue(String value) {
   final normalized = normalizeSongMatchText(value);
   return normalized.isNotEmpty &&
-      !const {'unknown', '未知', '未知艺术家', '未知专辑'}.contains(normalized);
+      !const {
+        'unknown',
+        'unknownartist',
+        'unknownalbum',
+        'variousartists',
+        'na',
+        'null',
+        '未知',
+        '未知艺术家',
+        '未知歌手',
+        '未知专辑',
+        '群星',
+        '未填写',
+        '未提供',
+        '不详',
+        '未识别',
+      }.contains(normalized);
 }
 
 double _fieldSimilarity(String expected, String candidate) {
@@ -256,9 +281,10 @@ double computeSongMatchScore(
   final expectedTitle = canonicalSongTitleForMatch(
     _meaningfulMatchValue(audio.title) ? audio.title : audio.fileNameTitle,
   );
+  final expectedArtist = _effectiveMatchArtist(audio);
   final fields = <(String, String, double)>[
     (expectedTitle, canonicalSongTitleForMatch(title), 0.74),
-    (audio.artist, artists, 0.18),
+    (expectedArtist, artists, 0.18),
     (audio.album, album, 0.08),
   ];
   var score = 0.0;
@@ -633,13 +659,13 @@ Future<LyricSearchResponse> searchLyricCandidates(
                 : audio.fileNameTitle,
           );
           final contextualQuery = queries.length > 1 && query == queries.first;
+          final effectiveArtist = _effectiveMatchArtist(audio);
           final records = await lrclibTransport
               .search(
                 trackName: title,
-                artistName:
-                    contextualQuery && _meaningfulMatchValue(audio.artist)
-                        ? audio.artist
-                        : null,
+                artistName: contextualQuery && effectiveArtist.isNotEmpty
+                    ? effectiveArtist
+                    : null,
                 limit: limit,
                 cancellation: sourceCancellations[ResultSource.lrclib],
               )

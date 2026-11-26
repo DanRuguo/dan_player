@@ -176,6 +176,7 @@ class _LyricLineViewState extends State<LyricLineView>
         settings.translationFontSize,
         settings.lyricLetterSpacing,
         settings.value.showJapaneseReading,
+        settings.value.showEnglishPhonetics,
         MediaQuery.textScalerOf(context),
         DefaultTextStyle.of(context).style,
         AppFontScope.of(context),

@@ -1,3 +1,4 @@
+import 'package:dan_player/component/app_content_transition.dart';
 import 'package:dan_player/library/personal_library.dart';
 import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/material.dart';
@@ -118,9 +119,9 @@ class _PersonalAnnotationsCardState extends State<PersonalAnnotationsCard> {
     return Card.filled(
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-            borderRadius: AppShape.controlRadius,
+            borderRadius: AppShape.surfaceRadius,
             side: BorderSide(
-                color: scheme.outlineVariant.withValues(alpha: .55))),
+                color: scheme.outlineVariant.withValues(alpha: .5))),
         color: scheme.surfaceContainerLow,
         child: Padding(
             padding: const EdgeInsets.all(18),
@@ -143,53 +144,61 @@ class _PersonalAnnotationsCardState extends State<PersonalAnnotationsCard> {
                                             fontWeight: FontWeight.w600))),
                           ])),
                       controls: Semantics(
-                          label: ui('标注分组'),
-                          child: Wrap(
+                        label: ui('标注分组'),
+                        child: StatisticsPillSegmented<String>(
+                          key: const ValueKey('personal-annotations-selector'),
+                          value: _group,
+                          options: [
+                            (
+                              value: 'ratings',
+                              label: ui('评级'),
+                              icon: Icons.star_outline_rounded,
                               key: const ValueKey(
-                                  'personal-annotations-selector'),
-                              alignment: WrapAlignment.end,
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                for (final option in [
-                                  ('ratings', '评级'),
-                                  ('tags', '标签')
-                                ])
-                                  ChoiceChip(
-                                      key: ValueKey(
-                                          'personal-annotations-${option.$1}'),
-                                      label: Text(ui(option.$2)),
-                                      selected: _group == option.$1,
-                                      onSelected: (selected) {
-                                        if (selected) {
-                                          setState(() => _group = option.$1);
-                                        }
-                                      }),
-                              ])),
+                                  'personal-annotations-ratings'),
+                            ),
+                            (
+                              value: 'tags',
+                              label: ui('标签'),
+                              icon: Icons.sell_outlined,
+                              key: const ValueKey('personal-annotations-tags'),
+                            ),
+                          ],
+                          onChanged: (next) => setState(() => _group = next),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     if (snapshot == null)
                       Text(ui('个人标注统计尚未就绪'))
-                    else ...[
-                      StatisticsDistributionView(
-                          chartId: _group,
-                          availableWidth: constraints.maxWidth,
-                          slices: _slices(context, snapshot),
-                          centerValue: '$count',
-                          centerLabel: ui(ratings ? '个评级' : '个标签'),
-                          centerSemanticsLabel: ui(
-                              ratings
-                                  ? (count == 1 ? '1 个评级' : '{0} 个评级')
-                                  : (count == 1 ? '1 次标签标注' : '{0} 次标签标注'),
-                              [count])),
-                      const SizedBox(height: 16),
-                      Text(
-                          ratings
-                              ? ui('按已评级歌曲计算比例；未评级歌曲不参与。')
-                              : '${ui('按逐歌标签附着次数计算；一首歌可有多个标签，次数不等于歌曲总数。')} ${ui('显示前 5 个标签，其余合并为“其他标签”。')}',
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: scheme.onSurfaceVariant)),
-                    ],
+                    else
+                      AppContentTransition(
+                        identity: _group,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            StatisticsDistributionView(
+                                chartId: _group,
+                                availableWidth: constraints.maxWidth,
+                                slices: _slices(context, snapshot),
+                                centerValue: '$count',
+                                centerLabel: ui(ratings ? '个评级' : '个标签'),
+                                centerSemanticsLabel: ui(
+                                    ratings
+                                        ? (count == 1 ? '1 个评级' : '{0} 个评级')
+                                        : (count == 1
+                                            ? '1 次标签标注'
+                                            : '{0} 次标签标注'),
+                                    [count])),
+                            const SizedBox(height: 16),
+                            Text(
+                                ratings
+                                    ? ui('按已评级歌曲计算比例；未评级歌曲不参与。')
+                                    : '${ui('按逐歌标签附着次数计算；一首歌可有多个标签，次数不等于歌曲总数。')} ${ui('显示前 5 个标签，其余合并为“其他标签”。')}',
+                                style: theme.textTheme.bodySmall
+                                    ?.copyWith(color: scheme.onSurfaceVariant)),
+                          ],
+                        ),
+                      ),
                   ]);
             })));
   }

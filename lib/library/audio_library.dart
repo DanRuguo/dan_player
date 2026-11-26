@@ -14,7 +14,7 @@ import 'package:dan_player/library/track_identity.dart';
 import 'package:dan_player/online/custom_music_source_profile.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
 import 'package:dan_player/utils.dart';
-import 'package:flutter/foundation.dart' show ValueNotifier;
+import 'package:flutter/foundation.dart' show SynchronousFuture, ValueNotifier;
 import 'package:flutter/painting.dart';
 import 'package:path/path.dart' as path_util;
 
@@ -551,6 +551,12 @@ class Audio {
     return source == null ? _discNumber : source._discNumber;
   }
 
+  final String? _discSubtitle;
+  String? get discSubtitle {
+    final source = _indexedSource;
+    return source == null ? _discSubtitle : source._discSubtitle;
+  }
+
   final bool discNumberRead;
 
   Audio? get _indexedSource => isCueTrack
@@ -627,6 +633,7 @@ class Audio {
     this.id3TextChecked,
     this.folderCoverStamp,
     int? discNumber,
+    String? discSubtitle,
     this.discNumberRead = false,
     this.cueTrack,
     this.durationVersion = 1,
@@ -639,6 +646,7 @@ class Audio {
     this.onlineDownloadAllowed,
     String? stableTrackId,
   })  : _discNumber = discNumber,
+        _discSubtitle = discSubtitle,
         _identityHint = stableTrackId,
         splitedArtists = artist.split(
           RegExp(AppSettings.instance.artistSplitPattern),
@@ -867,6 +875,7 @@ class Audio {
       discNumber: map['disc_number'] is num && map['disc_number'] > 0
           ? (map['disc_number'] as num).toInt()
           : null,
+      discSubtitle: _optionalTag(map['disc_subtitle']),
       discNumberRead: map.containsKey('disc_number'),
       cueTrack: cue,
       durationVersion: (map['duration_version'] as num?)?.toInt() ?? 0,
@@ -894,6 +903,7 @@ class Audio {
         if (id3TextChecked != null) "id3_text_checked": id3TextChecked,
         if (folderCoverStamp != null) "folder_cover_stamp": folderCoverStamp,
         if (discNumberRead || discNumber != null) "disc_number": discNumber,
+        if (discSubtitle != null) "disc_subtitle": discSubtitle,
         "path": path,
         if (cueTrack != null) 'cue_track': cueTrack!.toMap(),
         "modified": modified,
@@ -928,9 +938,7 @@ class Audio {
   static int _readClassificationVersion(Object? value) =>
       value is int && value >= 1 ? value : 0;
 
-  /// Load a bounded thumbnail for a physical-pixel request. UI callers should
-  /// use AudioArtwork or pass their own View DPR to [coverForDisplay].
-  Future<ImageProvider?> artworkForSize(ArtworkSize size) async {
+  ImageProvider? _onlineArtworkForSize(ArtworkSize size) {
     final remoteArtwork = artworkUrl;
     final isCustomProvider = onlineProvider?.startsWith('custom:') == true;
     final customProfile = isCustomProvider ? customArtworkProfile : null;
@@ -963,7 +971,30 @@ class Audio {
         );
       }
     }
-    if (isOnline) return null;
+    return null;
+  }
+
+  /// Synchronously returns an already-known [ImageProvider] (or known absence)
+  /// without scheduling microtasks or native decoding.
+  ({bool hit, ImageProvider? provider}) peekArtworkForSize(ArtworkSize size) {
+    if (isOnline) {
+      return (hit: true, provider: _onlineArtworkForSize(size));
+    }
+    return CoverCache.instance.peekImageFor(
+      audioPath: localFilePath,
+      modified: modified,
+      fingerprint: coverFingerprint,
+      width: size.width,
+      height: size.height,
+    );
+  }
+
+  /// Load a bounded thumbnail for a physical-pixel request. UI callers should
+  /// use AudioArtwork or pass their own View DPR to [coverForDisplay].
+  Future<ImageProvider?> artworkForSize(ArtworkSize size) {
+    if (isOnline) {
+      return SynchronousFuture<ImageProvider?>(_onlineArtworkForSize(size));
+    }
     // Capture mutable metadata now: an edit must not make a queued request
     // read a different file and cache it under the previous file's identity.
     final requestedPath = localFilePath;

@@ -46,11 +46,7 @@
 </div>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/library-dark-wide.png">
-    <source media="(prefers-color-scheme: light)" srcset="docs/images/library-light-wide.png">
-    <img src="docs/images/library-light-wide.png" alt="中国語 UI と架空のデータを使用した Dan Player のライブラリと再生コントロール" width="1200">
-  </picture>
+  <img src="docs/images/snapshot8-categories-ja.png" alt="カスタムジャケットを使ったアルバム分類" width="910">
 </p>
 
 <p align="center">
@@ -71,7 +67,7 @@
 
 **インストーラー版**はセットアップを実行してください。既存のインストールを更新できます。**ポータブル版**は ZIP 全体を展開して `Dan Player.exe` を起動してください。EXE だけを取り出さないでください。デスクトップ歌詞は同じ実行ファイルから別プロセスとして起動します。
 
-現在のポータブル ZIP には FFmpeg、3つのオフライン日本語読みデータ（主辞書・語彙補完・漢字読み補完）とライセンスを同梱し、試聴・音声切り出し・オフラインの読み生成に利用できます。軽量インストーラーにはこの2種類のコンポーネントを含めず、導入済みのものは保持します。プレーヤーから手動で取得する際も固定サイズと SHA-256 を検証します。FFmpeg は [26.0.5 の独立パッケージ](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)、読みデータは [26.1.1 のリリースページ](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.1)から個別に取得できます。
+スナップショット 8 のポータブル版には、音声用 FFmpeg 7.1.1 とオフラインの日本語読みデータ 3 種を同梱しています。軽量インストーラーを使用する場合は、必要なコンポーネントを設定から追加できます。プレーヤーはこのリリースから取得し、サイズと SHA-256 を照合して `tool` に配置した後、動作を確認します。1 MB 未満の英語 IPA 辞書は両方の版に内蔵しています。 [スナップショット 8 と追加コンポーネント](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.2-snapshot.8)
 
 > **ダウンロードと署名について**：本プロジェクトの実行ファイルには RCEIT.Inc の自己署名証明書を使用しているため、Windows に信頼性の警告が表示される場合があります。インストーラーが信頼済み証明書を自動で登録することはありません。古い署名のバージョンから更新する場合は、新しいインストーラーを手動でダウンロードしてください。プレビュー版は Latest の安定版を置き換えません。更新前に、アプリのバックアップと復元設定から個人データを保存することをおすすめします。
 
@@ -114,63 +110,15 @@ Get-FileHash -LiteralPath '.\DanPlayer-VERSION-Setup-x64.exe' -Algorithm SHA256
 
 <a id="screenshots"></a>
 
-## インターフェース
+## 画面ギャラリー
 
-### 次の曲とスペクトラムガイド
+検索では条件を指定したり、履歴からもう一度検索したりできます。「設定」の「更新とバージョン情報」から問題の報告を開くと、過去 15 日間のログをセッションや重大度で絞り込み、内容を編集してから GitHub の下書きを開けます。
 
-実際のコンポーネントを日本語 UI と架空のデータで描画しています。スペクトラムはガイドのデモであり、実際の音声を計測したものではありません。
-
-| 半透明カードで次の4曲を表示 | 丸いバーとピクセルのスペクトラムガイド |
+| 検索と履歴 | 問題を報告 |
 | --- | --- |
-| ![日本語の次曲プレビュー：半透明の4枚のカードを2列に表示](docs/images/feature-upcoming-ja.png) | ![日本語の操作ガイド：丸いバーとピクセルのスペクトラム](docs/images/feature-spectrum-guide-ja.png) |
+| ![検索と履歴](docs/images/snapshot8-search-ja.png) | ![問題を報告](docs/images/snapshot8-report-ja.png) |
 
-### マニュアルと必要時のリソース監視
-
-実際のコンポーネントを中国語表示で描画した例です。使用率とパスは架空のデータです。
-
-| 日常の操作説明 | 再生キューと操作できるデモ |
-| --- | --- |
-| ![音楽・分類・プレイリストの操作説明](docs/images/manual-common-library.png) | ![再生位置のデモとキュー操作の説明](docs/images/manual-playback-demo.png) |
-
-| 複数の場所でリソース監視 | キャッシュの容量分類 |
-| --- | --- |
-| ![サイドバーとバックアップ設定で共有するリソース監視](docs/images/process-resource-locations.png) | ![統計画面のキャッシュとプレーヤーデータの容量分類](docs/images/cache-storage-statistics.png) |
-
-### 2 種類の歌詞編集
-
-| タップ編集：テキストの準備 | タップ編集：狭い画面で単語の時刻付け |
-| --- | --- |
-| ![中国語 UI のタップ編集：本文・翻訳・読みの入力](docs/images/lyric-tap-text-zh.png) | ![中国語 UI の狭いタップ編集：単語の時刻付け](docs/images/lyric-tap-words-narrow-zh.png) |
-
-| テキスト編集：歌詞コード | テキスト編集：単語のプレビュー |
-| --- | --- |
-| ![中国語 UI のテキスト編集：QRC コード](docs/images/lyric-code-editor-zh.png) | ![中国語 UI のテキスト編集：単語ごとのプレビュー](docs/images/lyric-editor-preview-zh.png) |
-
-### コレクションを、自分の使い方に合わせて整理
-
-| プレイリストとコレクション | 外観と設定 |
-| --- | --- |
-| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/playlists-dark-wide.png"><img src="docs/images/playlists-light-wide.png" alt="中国語 UI のプレイリスト管理画面" width="600"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/settings-dark-wide.png"><img src="docs/images/settings-light-wide.png" alt="中国語 UI のテーマとグループ別設定" width="600"></picture> |
-
-### 聴きたい曲を見つけ、歌詞に集中
-
-| 検索と履歴 | ミニプレーヤーと歌詞 |
-| --- | --- |
-| ![日本語の検索ページ内容領域を Flutter ウィジェットで描画。履歴チップを中央揃えで表示](docs/images/search-history-ja.png) | ![架空のデータを使ったミニプレーヤーと歌詞表示](docs/images/feature-mini-lyrics-dark.png) |
-
-### 再生記録から、自分のライブラリを再発見
-
-![架空のデータを使った中国語 UI の音楽統計とランキング](docs/images/statistics-rankings-light.png)
-
-<sub>実際の Flutter ウィジェットを隔離したデモデータで描画しています。検索画像は日本語ページの内容領域と履歴の例で、ネイティブウィンドウ全体のスクリーンショットではありません。その他の例は主に中国語 UI です。画像は配置と機能の紹介であり、リアルタイム音声や Windows ネイティブ効果の検証ではありません。テーマ・ウィンドウ幅・4 言語の例は<a href="docs/images/README.md">画像ギャラリー</a>をご覧ください。</sub>
-
-### 分類タイルと初回ガイド
-
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/feature-category-tiles-dark.png"><img src="docs/images/feature-category-tiles-light.png" alt="分類ごとの表示設定と複数サイズのカバー。架空のデモデータを使用" width="1200"></picture>
-
-| 初回ガイド：言語を選び、再生操作を体験 | プレーヤーデータとローカル音楽の選択復元 |
-| --- | --- |
-| ![初回ガイド：言語を選び、再生操作を体験](docs/images/feature-onboarding-ja.png) | ![プレーヤーデータとローカル音楽の選択復元](docs/images/feature-restore-ja.png) |
+[ほかの画面と機能の使用例](docs/images/README.md)
 
 <a id="quick-start"></a>
 

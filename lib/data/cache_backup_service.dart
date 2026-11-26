@@ -1488,6 +1488,7 @@ bool _shouldIncludeCacheEntry(String relative) {
   if (segments.any((segment) =>
       segment == BackupRestorePreservation.planName ||
       segment == 'updates' ||
+      segment == 'logs' ||
       segment == 'restored-music' ||
       segment == 'library_migrations' ||
       segment.startsWith('.dan-player-restore-') ||

@@ -170,45 +170,73 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
     bool enabled = true,
   }) {
     final scheme = Theme.of(context).colorScheme;
+    final fgColor = !enabled
+        ? scheme.onSurface.withValues(alpha: .38)
+        : checked
+            ? scheme.onSecondaryContainer
+            : scheme.onSurface;
+    final iconColor = !enabled
+        ? scheme.onSurface.withValues(alpha: .38)
+        : checked
+            ? scheme.onSecondaryContainer
+            : scheme.primary;
     return PopupMenuItem<_SortChoice<T>>(
       key: key,
       value: value,
       enabled: enabled,
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Row(
-        children: [
-          Icon(icon,
-              size: 20,
-              color: enabled
-                  ? scheme.onSurfaceVariant
-                  : scheme.onSurface.withValues(alpha: .38)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(ui(label), semanticsLabel: ui(label)),
+      height: 46,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: checked
+              ? scheme.secondaryContainer.withValues(alpha: .76)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          child: Row(
+            children: [
+              Icon(icon, size: 19, color: iconColor),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  ui(label),
+                  semanticsLabel: ui(label),
+                  style: TextStyle(
+                    color: fgColor,
+                    fontWeight: checked ? FontWeight.w600 : FontWeight.w500,
+                  ),
+                ),
+              ),
+              if (checked) ...[
+                const SizedBox(width: 8),
+                Icon(Icons.check_rounded, size: 18, color: iconColor),
+              ],
+            ],
           ),
-          if (checked) ...[
-            const SizedBox(width: 8),
-            Icon(Icons.check, size: 18, color: scheme.primary),
-          ],
-        ],
+        ),
       ),
     );
   }
 
   List<PopupMenuEntry<_SortChoice<T>>> _menuItems() {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final items = <PopupMenuEntry<_SortChoice<T>>>[];
     if (_needsScrollHint) {
       items.add(PopupMenuItem<_SortChoice<T>>(
         key: const ValueKey('app-sort-scroll-hint'),
         enabled: false,
-        height: 48,
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         child: Row(children: [
-          const Icon(Icons.unfold_more, size: 18),
+          Icon(Icons.unfold_more_rounded, size: 18, color: scheme.primary),
           const SizedBox(width: 8),
           Expanded(
               child: Text(ui("滚动或滑动查看更多排序项"),
-                  style: Theme.of(context).textTheme.bodySmall)),
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: scheme.onSurfaceVariant))),
         ]),
       ));
     }
@@ -219,8 +247,8 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
           value: _DirectionChoice(direction),
           label: direction.label,
           icon: direction == SortDirection.ascending
-              ? Icons.arrow_upward
-              : Icons.arrow_downward,
+              ? Icons.arrow_upward_rounded
+              : Icons.arrow_downward_rounded,
           checked: direction == widget.direction,
         ));
       }
@@ -239,9 +267,16 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
       if (entry.key != null) {
         items.add(PopupMenuItem<_SortChoice<T>>(
           enabled: false,
-          height: 48,
-          child: Text(ui(entry.key!),
-              style: Theme.of(context).textTheme.labelMedium),
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: Text(
+            ui(entry.key!),
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: scheme.primary,
+              fontWeight: FontWeight.w700,
+              letterSpacing: .2,
+            ),
+          ),
         ));
       }
       for (final option in entry.value) {
@@ -260,9 +295,13 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
       items.add(PopupMenuItem<_SortChoice<T>>(
         enabled: false,
         height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Text(_localizedHelpText(text),
-            style: Theme.of(context).textTheme.bodySmall),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        child: Text(
+          _localizedHelpText(text),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
+        ),
       ));
     }
     return items;
@@ -281,11 +320,16 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
         context: _anchor.currentContext ?? context,
         semanticLabel: _needsScrollHint ? ui("排序方式，可滚动查看更多字段") : ui("排序方式"),
         positionBuilder: _position,
-        shape: AppShape.control,
-        color: scheme.surfaceContainer,
+        shape: RoundedRectangleBorder(
+          borderRadius: AppShape.surfaceRadius,
+          side: BorderSide(
+            color: scheme.outlineVariant.withValues(alpha: .48),
+          ),
+        ),
+        color: scheme.surfaceContainerLow,
         surfaceTintColor: Colors.transparent,
-        shadowColor: scheme.shadow.withValues(alpha: .18),
-        elevation: 4,
+        shadowColor: scheme.shadow.withValues(alpha: .22),
+        elevation: 6,
         requestFocus: true,
         constraints: BoxConstraints(
           maxWidth:
@@ -328,7 +372,7 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
     final reduced = appToolbarReduceMotion(context);
     final maxWidth = widget.maxWidth ??
         math.max(44.0, math.min(320.0, MediaQuery.sizeOf(context).width - 32));
-    const arrow = Icon(Icons.expand_more, size: 18);
+    const arrow = Icon(Icons.expand_more_rounded, size: 18);
     // showMenu captures these inherited themes from the trigger. Only its
     // popup scroll viewport uses the retained shader stretch; page scrolls
     // keep their existing raster path, independent of the popup animation.
@@ -358,7 +402,7 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
                       onPressed: _enabled ? _show : null,
                       style: appToolbarControlStyle(context,
                           reduced: reduced, iconOnly: true),
-                      icon: const Icon(Icons.sort))
+                      icon: const Icon(Icons.sort_rounded))
                   : OutlinedButton(
                       onPressed: _enabled ? _show : null,
                       style: appToolbarControlStyle(context, reduced: reduced),
@@ -366,10 +410,10 @@ class _AppSortButtonState<T> extends State<AppSortButton<T>>
                         label: label,
                         semanticsLabel: ui("排序：{0}", [label]),
                         icon: widget.direction == null
-                            ? Icons.sort
+                            ? Icons.sort_rounded
                             : widget.direction == SortDirection.ascending
-                                ? Icons.arrow_upward
-                                : Icons.arrow_downward,
+                                ? Icons.arrow_upward_rounded
+                                : Icons.arrow_downward_rounded,
                         trailing: reduced
                             ? arrow
                             : AnimatedRotation(

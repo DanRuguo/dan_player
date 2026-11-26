@@ -1,6 +1,7 @@
 import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/responsive_builder.dart';
 import 'package:dan_player/component/app_entrance.dart';
+import 'package:dan_player/component/text_motion_stabilizer.dart';
 import 'package:flutter/material.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -83,7 +84,7 @@ class PageScaffold extends StatelessWidget {
 
               const menuStyle = MenuStyle(
                 shape: WidgetStatePropertyAll(
-                  AppShape.control,
+                  AppShape.surface,
                 ),
               );
 
@@ -93,12 +94,13 @@ class PageScaffold extends StatelessWidget {
                 actions.first,
                 if (foldedColumn.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.only(left: 16.0),
+                    padding: const EdgeInsets.only(left: 12.0),
                     child: AppMenuAnchor(
                       style: menuStyle,
                       menuChildren: foldedColumn,
                       builder: (_, controller, __) => IconButton.filledTonal(
                         style: IconButton.styleFrom(
+                            shape: AppShape.pill,
                             foregroundColor: Theme.of(context)
                                 .colorScheme
                                 .onSecondaryContainer),
@@ -217,7 +219,12 @@ class PageScaffold extends StatelessWidget {
 
   Widget _onlyTitleContent(ColorScheme scheme) => Text(
         title,
-        style: TextStyle(fontSize: 32.0, color: scheme.onSurface),
+        style: TextStyle(
+          fontSize: 30.0,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.3,
+          color: scheme.onSurface,
+        ),
         overflow: TextOverflow.ellipsis,
       );
 
@@ -229,12 +236,24 @@ class PageScaffold extends StatelessWidget {
         children: [
           Text(
             title,
-            style: TextStyle(fontSize: 28.0, color: scheme.onSurface),
+            style: TextStyle(
+              fontSize: 28.0,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.3,
+              height: 1.18,
+              color: scheme.onSurface,
+            ),
             overflow: TextOverflow.ellipsis,
           ),
+          const SizedBox(height: 4),
           Text(
             subtitle!,
-            style: TextStyle(fontSize: 14.0, color: scheme.onSurface),
+            style: TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w500,
+              color: scheme.onSurfaceVariant,
+              fontFeatures: tabularFiguresFeatures,
+            ),
             overflow: wrapSubtitle ? TextOverflow.clip : TextOverflow.ellipsis,
           )
         ],

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([string] $CacheRoot, [string] $Destination, [switch] $VerifyOnly)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -7,7 +7,7 @@ if (-not $CacheRoot) { $CacheRoot = Join-Path (Split-Path -Parent $repository) '
 $manifestPath = Join-Path $PSScriptRoot 'ffmpeg_runtime_manifest.json'
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if (-not (Test-Path -LiteralPath $CacheRoot -PathType Container)) {
-    throw 'The pinned FFmpeg runtime is missing. Populate tool/ffmpeg-7.1.1/runtime from the matching Gyan distribution before packaging.'
+    throw 'The pinned FFmpeg runtime is missing. Populate tool/ffmpeg-7.1.1/runtime matching scripts/ffmpeg_runtime_manifest.json before packaging.'
 }
 function Assert-RegularFile([string] $FilePath) {
     $item = Get-Item -LiteralPath $FilePath -Force

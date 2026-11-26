@@ -520,7 +520,7 @@ class _TapLyricEditorState extends State<TapLyricEditor> {
             maxLines: 10,
             enabled: !busy,
             decoration: InputDecoration(
-                border: const OutlineInputBorder(), labelText: ui('纯文本歌词'))),
+                alignLabelWithHint: true, labelText: ui('纯文本歌词'))),
         const SizedBox(height: 12),
         Wrap(spacing: 8, runSpacing: 8, children: [
           _button('联网填入纯文本', Symbols.cloud_download, _online),

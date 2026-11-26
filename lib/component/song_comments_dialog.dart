@@ -600,69 +600,104 @@ class _SongCommentsDialogState extends State<SongCommentsDialog>
     final store = SongCommentAssociationStore.instance;
     final association = store.associationFor(widget.audio);
     final lyricIdentity = store.lyricIdentityFor(widget.audio);
+    final statusLabel = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          association == null ? Symbols.link_off : Symbols.link,
+          size: 18,
+          color: association == null ? scheme.onSurfaceVariant : scheme.primary,
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            association == null
+                ? ui("评论来源：尚未关联")
+                : ui("评论来源：{0}{1}", [
+                    ui(association.mode.label),
+                    _target == null
+                        ? ''
+                        : ' · ${onlineSourceDisplayLabel(
+                            provider: _target!.provider,
+                            fallback: _target!.sourceLabel,
+                          )}'
+                  ]),
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    );
+    final actionButtons = Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        FilledButton.tonalIcon(
+          key: const ValueKey('song-comments-choose-association'),
+          onPressed: _associationBusy ? null : _chooseAssociation,
+          icon: const Icon(Symbols.search),
+          label: Text(ui("选择关联歌曲")),
+        ),
+        Tooltip(
+          message: lyricIdentity == null
+              ? ui("当前歌词不是带平台 ID 的 QQ音乐或网易云来源")
+              : ui("评论来源会随以后选择的联网歌词变化"),
+          child: OutlinedButton.icon(
+            key: const ValueKey('song-comments-follow-lyric'),
+            onPressed:
+                _associationBusy || lyricIdentity == null ? null : _followLyric,
+            icon: const Icon(Symbols.lyrics),
+            label: Text(ui("跟随联网歌词")),
+          ),
+        ),
+        if (association != null)
+          TextButton.icon(
+            key: const ValueKey('song-comments-remove-association'),
+            onPressed: _associationBusy ? null : _removeAssociation,
+            icon: const Icon(Symbols.link_off),
+            label: Text(ui("解除关联")),
+          ),
+      ],
+    );
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: scheme.surfaceContainerLow,
-          borderRadius: AppShape.controlRadius,
-          border: Border.all(color: scheme.outlineVariant),
+          borderRadius: AppShape.surfaceRadius,
+          border: Border.all(
+            color: scheme.outlineVariant.withValues(alpha: .46),
+          ),
         ),
         child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  association == null
-                      ? ui("评论来源：尚未关联")
-                      : ui("评论来源：{0}{1}", [
-                          ui(association.mode.label),
-                          _target == null
-                              ? ''
-                              : ' · ${onlineSourceDisplayLabel(
-                                  provider: _target!.provider,
-                                  fallback: _target!.sourceLabel,
-                                )}'
-                        ]),
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 8),
-                Wrap(spacing: 8, runSpacing: 8, children: [
-                  FilledButton.tonalIcon(
-                    key: const ValueKey('song-comments-choose-association'),
-                    onPressed: _associationBusy ? null : _chooseAssociation,
-                    icon: const Icon(Symbols.search),
-                    label: Text(ui("选择关联歌曲")),
-                  ),
-                  Tooltip(
-                    message: lyricIdentity == null
-                        ? ui("当前歌词不是带平台 ID 的 QQ音乐或网易云来源")
-                        : ui("评论来源会随以后选择的联网歌词变化"),
-                    child: OutlinedButton.icon(
-                      key: const ValueKey('song-comments-follow-lyric'),
-                      onPressed: _associationBusy || lyricIdentity == null
-                          ? null
-                          : _followLyric,
-                      icon: const Icon(Symbols.lyrics),
-                      label: Text(ui("跟随联网歌词")),
-                    ),
-                  ),
-                  if (association != null)
-                    TextButton.icon(
-                      key: const ValueKey('song-comments-remove-association'),
-                      onPressed: _associationBusy ? null : _removeAssociation,
-                      icon: const Icon(Symbols.link_off),
-                      label: Text(ui("解除关联")),
-                    ),
-                ]),
-                if (_associationError != null) ...[
-                  const SizedBox(height: 8),
-                  Text(_associationError!(),
-                      style: TextStyle(color: scheme.error)),
-                ],
-              ]),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: LayoutBuilder(builder: (context, constraints) {
+            final scale = MediaQuery.textScalerOf(context).scale(1);
+            final inline = constraints.maxWidth >= 460 * scale;
+            return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (inline)
+                    Row(
+                      children: [
+                        Expanded(child: statusLabel),
+                        const SizedBox(width: 12),
+                        actionButtons,
+                      ],
+                    )
+                  else ...[
+                    statusLabel,
+                    const SizedBox(height: 8),
+                    actionButtons,
+                  ],
+                  if (_associationError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(_associationError!(),
+                        style: TextStyle(color: scheme.error)),
+                  ],
+                ]);
+          }),
         ),
       ),
     );
@@ -701,8 +736,7 @@ class _SongCommentsDialogState extends State<SongCommentsDialog>
               key: const ValueKey('song-comments-retry'),
               style: FilledButton.styleFrom(
                   minimumSize: const Size(44, 44),
-                  visualDensity: VisualDensity.standard,
-                  shape: AppShape.control),
+                  visualDensity: VisualDensity.standard),
               onPressed: () => unawaited(_load(refresh: tab.retryRefresh)),
               icon: const Icon(Symbols.refresh),
               label: Text(ui("重试")),
@@ -715,13 +749,12 @@ class _SongCommentsDialogState extends State<SongCommentsDialog>
     if (tab.reachedLimit) return Text(ui("已达到本次每个分类最多 10 页（200 条）的读取上限。"));
     if (!tab.hasMore) return Text(ui("已显示平台返回的全部评论。"));
     return Align(
-      alignment: Alignment.centerLeft,
+      alignment: Alignment.center,
       child: OutlinedButton.icon(
         key: const ValueKey('song-comments-load-more'),
         style: OutlinedButton.styleFrom(
             minimumSize: const Size(44, 44),
-            visualDensity: VisualDensity.standard,
-            shape: AppShape.control),
+            visualDensity: VisualDensity.standard),
         onPressed: _load,
         icon: const Icon(Symbols.expand_more),
         label: Text(ui("加载更多")),

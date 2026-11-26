@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/player_experience_preferences.dart';
 import 'package:dan_player/ui_layout_preferences.dart';
 import 'package:dan_player/component/ui_layout_options.dart';
 import 'package:dan_player/component/settings_tile.dart';
@@ -67,7 +68,7 @@ class _InterfaceSettingsState extends State<InterfaceSettings> {
         )),
       if (widget.group == InterfaceSettingsGroup.all)
         const SizedBox(height: 16),
-      if (widget.group != InterfaceSettingsGroup.language)
+      if (widget.group != InterfaceSettingsGroup.language) ...[
         ValueListenableBuilder<UiLayoutPreferences>(
             valueListenable: AppSettings.instance.uiLayout,
             builder: (context, value, _) => UiLayoutOptions(
@@ -76,6 +77,22 @@ class _InterfaceSettingsState extends State<InterfaceSettings> {
                   AppSettings.instance.uiLayout.value = next;
                   unawaited(_save());
                 })),
+        const SizedBox(height: 12),
+        ValueListenableBuilder<PlayerExperiencePreferences>(
+            valueListenable: AppSettings.instance.experience,
+            builder: (context, experience, _) => SettingsSwitchTile(
+                controlKey: const ValueKey('ui-touch-sound-switch'),
+                icon: Icons.touch_app_outlined,
+                title: Text(ui('触控与点击音效')),
+                subtitle: Text(ui(
+                    '点击按钮与列表项时播放轻柔的 Android 默认触控音效；点击空白区域不发声，WASAPI 独占输出时自动静音。')),
+                value: experience.touchSound,
+                onChanged: (enabled) {
+                  AppSettings.instance.experience.value =
+                      experience.copyWith(touchSound: enabled);
+                  unawaited(_save());
+                })),
+      ],
       if (_failed)
         Row(children: [
           Expanded(

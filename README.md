@@ -46,11 +46,7 @@
 </div>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/library-dark-wide.png">
-    <source media="(prefers-color-scheme: light)" srcset="docs/images/library-light-wide.png">
-    <img src="docs/images/library-light-wide.png" alt="Dan Player 音乐主页：本地曲库与播放控制，使用虚构演示数据" width="1200">
-  </picture>
+  <img src="docs/images/snapshot8-categories-zh.png" alt="专辑分类与自定义封面" width="910">
 </p>
 
 <p align="center">
@@ -73,7 +69,7 @@
 
 **安装版**运行安装器，支持原位升级；**便携版**完整解压 ZIP 后运行 `Dan Player.exe`，不要只复制一个 EXE。桌面歌词由同一程序启动独立进程。
 
-当前便携包包含 FFmpeg、三份离线日语注音数据（主词典、词汇补充、汉字读音补充）及许可，完整解压后即可用于试听、裁剪与离线注音。精简安装器不附带这两类组件，并保留已经安装的组件；也可从播放器中手动下载，校验固定大小和 SHA-256。FFmpeg 沿用 [26.0.5 的独立组件包](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5)，注音数据在 [26.1.1 发布页](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.1)单独提供。
+快照 8 便携包随附精简音频版 FFmpeg 7.1.1 和三份离线日语假名资源。使用精简安装器时，可在设置中按需安装这两项组件。播放器从本次发布下载，验证文件大小与 SHA-256，安装到 `tool` 后复检。英语 IPA 词库小于 1 MB，两种版本均已内置。 [快照 8 发布与组件下载](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.2-snapshot.8)
 
 > **下载与签名说明**：自有程序使用 RCEIT.Inc 自签名证书，Windows 仍可能显示信任提示；安装器不会自动安装信任证书。旧签名版本请手动下载新安装器升级。预览版不替换稳定版 Latest；升级前建议通过播放器的“备份与恢复”保存个人资料。
 
@@ -117,63 +113,15 @@ Get-FileHash -LiteralPath '.\DanPlayer-版本号-Setup-x64.exe' -Algorithm SHA25
 
 <a id="screenshots"></a>
 
-## 界面一览
+## 界面预览
 
-### 待播预览与频谱指南
+深色搜索页支持字段筛选和历史查询。在设置的“更新与关于”中打开“报告问题”，可查看最近 15 天的运行记录，选择本次会话或仅显示警告与错误，编辑后打开 GitHub 草稿。
 
-以下使用实际组件、中文界面及虚构数据渲染；频谱是指南演示，不是实时音频采样。
-
-| 四首半透明待播卡片 | 圆头音柱与像素频谱互动指南 |
+| 搜索与历史记录 | 报告问题 |
 | --- | --- |
-| ![中文待播预览：四首半透明卡片与双列布局](docs/images/feature-upcoming-zh.png) | ![中文特色指南：圆头音柱与像素频谱演示](docs/images/feature-spectrum-guide-zh.png) |
+| ![搜索与历史记录](docs/images/snapshot8-search-zh.png) | ![报告问题](docs/images/snapshot8-report-zh.png) |
 
-### 说明书与按需监控
-
-以下是实际组件的中文界面渲染，资源数值及目录为示例数据。
-
-| 常用操作说明 | 播放队列与互动演示 |
-| --- | --- |
-| ![音乐、分类与歌单的操作说明](docs/images/manual-common-library.png) | ![进度定位演示与队列操作说明](docs/images/manual-playback-demo.png) |
-
-| 多处资源监控 | 缓存分类占用 |
-| --- | --- |
-| ![侧栏与备份恢复共用资源监控](docs/images/process-resource-locations.png) | ![统计页缓存和播放器资料分类占用](docs/images/cache-storage-statistics.png) |
-
-### 两种歌词编辑方式
-
-| 快捷点按：准备文本 | 快捷点按：窄窗逐字打点 |
-| --- | --- |
-| ![中文快捷点按的正文、翻译与注音输入](docs/images/lyric-tap-text-zh.png) | ![中文快捷点按在窄窗中的逐字打点](docs/images/lyric-tap-words-narrow-zh.png) |
-
-| 传统码字：歌词代码 | 传统码字：逐字预览 |
-| --- | --- |
-| ![中文传统歌词编辑器的 QRC 代码输入](docs/images/lyric-code-editor-zh.png) | ![中文传统歌词编辑器的逐字预览](docs/images/lyric-editor-preview-zh.png) |
-
-### 整理收藏，也保留自己的使用习惯
-
-| 歌单与收藏 | 外观与设置 |
-| --- | --- |
-| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/playlists-dark-wide.png"><img src="docs/images/playlists-light-wide.png" alt="歌单页面，展示收藏与列表组织" width="600"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/settings-dark-wide.png"><img src="docs/images/settings-light-wide.png" alt="设置页面，展示主题与分组设置" width="600"></picture> |
-
-### 找到想听的歌曲，专注眼前的歌词
-
-| 搜索页与历史 | 迷你播放器与歌词 |
-| --- | --- |
-| ![搜索页内容区域组件渲染：居中历史胶囊与强调色删除状态](docs/images/search-history-zh.png) | ![迷你播放器与歌词，使用虚构演示内容](docs/images/feature-mini-lyrics-dark.png) |
-
-### 从收听记录重新认识自己的曲库
-
-![音乐统计与歌曲排行，使用虚构演示数据](docs/images/statistics-rankings-light.png)
-
-<sub>图片使用实际 Flutter 控件与隔离演示数据；搜索图展示页面内容区域和示例历史，不是完整原生窗口截图。图片用于展示布局与功能，不代表实时音频或原生桌面效果测试。更多明暗主题、宽窄窗口和四语言示例见 <a href="docs/images/README.md">界面图库</a>。</sub>
-
-### 分类磁贴与首次迁移
-
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/feature-category-tiles-dark.png"><img src="docs/images/feature-category-tiles-light.png" alt="分类磁贴支持独立视图与多种封面尺寸，使用虚构演示数据" width="1200"></picture>
-
-| 首次引导：选择语言并体验播放控制 | 选择恢复内容：播放器资料与本地音乐 |
-| --- | --- |
-| ![首次引导：选择语言并体验播放控制](docs/images/feature-onboarding-zh.png) | ![选择恢复内容：播放器资料与本地音乐](docs/images/feature-restore-zh.png) |
+[更多播放器界面与功能示例](docs/images/README.md)
 
 <a id="quick-start"></a>
 

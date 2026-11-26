@@ -712,23 +712,34 @@ class _PlaylistTreePaneState<T> extends State<PlaylistTreePane<T>>
                     duration: appToolbarReduceMotion(context)
                         ? Duration.zero
                         : AppMotion.quick,
-                    width: 22,
+                    width: 24,
                     height: 24,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: Color.lerp(scheme.surfaceContainerHigh,
-                          scheme.primaryContainer, expanded ? .4 : .2),
+                      color: expanded
+                          ? scheme.primaryContainer
+                          : scheme.surfaceContainerHigh,
                       border: Border.all(
-                          color: scheme.outlineVariant.withValues(alpha: .55)),
-                      borderRadius: BorderRadius.circular(7),
+                        color: expanded
+                            ? scheme.primary.withValues(alpha: .28)
+                            : scheme.outlineVariant.withValues(alpha: .48),
+                      ),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                     child: AnimatedRotation(
                       turns: expanded ? .25 : 0,
                       duration: appToolbarReduceMotion(context)
                           ? Duration.zero
                           : AppMotion.quick,
-                      child: const Icon(Symbols.chevron_right,
-                          size: 19, weight: 600, opticalSize: 24),
+                      child: Icon(
+                        Symbols.chevron_right,
+                        size: 18,
+                        weight: 600,
+                        opticalSize: 24,
+                        color: expanded
+                            ? scheme.onPrimaryContainer
+                            : scheme.primary,
+                      ),
                     ),
                   ),
                 ),
@@ -802,20 +813,20 @@ class _PlaylistTreePaneState<T> extends State<PlaylistTreePane<T>>
         child: TextField(
             key: const ValueKey('playlist-tree-search'),
             controller: _search,
-            decoration: InputDecoration(
-                isDense: true,
-                labelText: ui('搜索树状歌单'),
-                prefixIcon: const Icon(Symbols.search),
-                suffixIcon: searching
-                    ? IconButton(
-                        tooltip: ui('清除搜索'),
-                        onPressed: () {
-                          _search.clear();
-                          widget.onQueryChanged?.call('');
-                          setState(() {});
-                        },
-                        icon: const Icon(Symbols.close))
-                    : null),
+            decoration: AppShape.searchDecoration(
+              context,
+              hintText: ui('搜索树状歌单'),
+              suffixIcon: searching
+                  ? IconButton(
+                      tooltip: ui('清除搜索'),
+                      onPressed: () {
+                        _search.clear();
+                        widget.onQueryChanged?.call('');
+                        setState(() {});
+                      },
+                      icon: const Icon(Symbols.close, size: 19))
+                  : null,
+            ),
             onChanged: (value) {
               widget.onQueryChanged?.call(value);
               setState(() {});

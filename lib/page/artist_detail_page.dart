@@ -1,21 +1,22 @@
 import 'package:dan_player/app_preference.dart';
-import 'package:dan_player/page/audio_sort_methods.dart';
-import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/component/audio_tile.dart';
-import 'package:dan_player/page/uni_detail_page.dart';
-import 'package:dan_player/page/categories_page.dart';
-import 'package:dan_player/library/music_categories.dart';
-import 'package:dan_player/library/category_cover_store.dart';
+import 'package:dan_player/component/detail_related_group_card.dart';
 import 'package:dan_player/component/music_grid.dart';
 import 'package:dan_player/component/playing_audio_list_row.dart';
+import 'package:dan_player/library/audio_library.dart';
+import 'package:dan_player/library/category_cover_store.dart';
+import 'package:dan_player/library/cover_cache.dart';
+import 'package:dan_player/library/music_categories.dart';
+import 'package:dan_player/page/audio_sort_methods.dart';
+import 'package:dan_player/page/categories_page.dart';
+import 'package:dan_player/page/uni_detail_page.dart';
 import 'package:dan_player/page/uni_page.dart';
 import 'package:dan_player/utils.dart';
+import 'package:desktop_lyric/ui_language.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:dan_player/component/app_shape.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
-import 'package:desktop_lyric/ui_language.dart';
 
 class ArtistDetailPage extends StatefulWidget {
   const ArtistDetailPage({super.key, required this.artist, this.nowPlayingPath})
@@ -47,6 +48,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   void initState() {
     super.initState();
     _classificationRevision = AudioLibrary.classificationRevision;
+    CategoryCoverStore.shared.load();
   }
 
   @override
@@ -63,9 +65,13 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return ValueListenableBuilder<int>(
-      valueListenable: AudioLibrary.changes,
-      builder: (context, _, __) => _buildPage(context),
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        AudioLibrary.changes,
+        CategoryCoverStore.shared,
+        CoverCache.instance.changes,
+      ]),
+      builder: (context, _) => _buildPage(context),
     );
   }
 
@@ -104,15 +110,17 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
       primaryPic: CategoryCoverStore.shared.hasCover(current)
           ? CategoryCoverStore.shared.imageFor(current)
           : current.coverAudio!.coverForDisplay(
-              size: 200,
-              devicePixelRatio: MediaQuery.devicePixelRatioOf(context)),
+              size: 192,
+              devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+            ),
       backgroundPic: CategoryCoverStore.shared.hasCover(current)
           ? CategoryCoverStore.shared.imageFor(current)
           : current.coverAudio!.cover,
       picShape: PicShape.oval,
+      badgeLabel: ui('艺术家'),
       title: current.title,
       subtitle: [
-        ui("{0} 首作品", [current.audios.length]),
+        ui('{0} 首作品', [current.audios.length]),
         if (formatCollectionDurationSeconds(
               sumKnownDurationSeconds(
                   current.audios.map((audio) => audio.duration)),
@@ -138,18 +146,14 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                 child: tile,
               );
       },
-      tertiaryContentTitle: ui("专辑"),
+      tertiaryContentTitle: ui('专辑'),
       tertiaryContent: albums,
       tertiaryContentBuilder: (context, album, i, multiSelectController) =>
-          ListTile(
+          DetailRelatedGroupCard(
+        group: album,
+        picShape: PicShape.rrect,
+        fallbackIcon: Symbols.album,
         onTap: () => context.push(album.location, extra: album),
-        leading: const Icon(Symbols.album),
-        title: Text(album.title),
-        subtitle: Text([
-          if (album.subtitle != null) album.subtitle!,
-          ui("{0} 首作品", [album.audios.length]),
-        ].join(' · ')),
-        shape: AppShape.control,
       ),
       enablePlayAll: true,
       enableShufflePlay: true,

@@ -1,4 +1,5 @@
 import 'package:desktop_lyric/font_policy.dart';
+import 'package:dan_player/component/text_motion_stabilizer.dart';
 import 'package:dan_player/category_presentation.dart';
 import 'package:dan_player/component/playlist_rectangle_tile.dart';
 import 'package:dan_player/component/playlist_tile_grid.dart';
@@ -1794,13 +1795,21 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                                             crossAxisAlignment:
                                                 CrossAxisAlignment.start,
                                             children: [
-                                              appFontText(context, row.label,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: Theme.of(context)
-                                                      .textTheme
-                                                      .titleMedium),
+                                              appFontText(
+                                                context,
+                                                row.label,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .titleMedium
+                                                    ?.copyWith(
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color: scheme.onSurface,
+                                                    ),
+                                              ),
+                                              const SizedBox(height: 2),
                                               Text(
                                                 ui("{0} 个直接项目 · {1} 首歌曲", [
                                                   folder.entries.length,
@@ -1810,7 +1819,13 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                                                 overflow: TextOverflow.ellipsis,
                                                 style: Theme.of(context)
                                                     .textTheme
-                                                    .bodySmall,
+                                                    .bodySmall
+                                                    ?.copyWith(
+                                                      color: scheme
+                                                          .onSurfaceVariant,
+                                                      fontFeatures:
+                                                          tabularFiguresFeatures,
+                                                    ),
                                               ),
                                             ],
                                           ),
@@ -1885,23 +1900,28 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
             child: Material(
               animationDuration: Duration.zero,
               color: _selecting && _isSelected(row)
-                  ? scheme.secondaryContainer.withValues(alpha: 0.4)
+                  ? scheme.secondaryContainer.withValues(alpha: 0.48)
                   : _draggingId == row.id
-                      ? scheme.primaryContainer.withValues(alpha: 0.2)
+                      ? scheme.primaryContainer.withValues(alpha: 0.24)
                       : _view == PlaylistViewMode.tree && folder != null
                           ? Color.alphaBlend(
                               scheme.primaryContainer.withValues(alpha: .5),
                               scheme.surfaceContainerLow)
-                          : compact && folder != null
+                          : _view == PlaylistViewMode.list && folder != null
                               ? scheme.surfaceContainerLow
                               : Colors.transparent,
               shape: RoundedRectangleBorder(
                 borderRadius: _view == PlaylistViewMode.grid
                     ? BorderRadius.zero
-                    : AppShape.controlRadius,
+                    : const BorderRadius.all(Radius.circular(14)),
                 side: _selecting && _isSelected(row)
                     ? BorderSide(color: scheme.primary, width: 2)
-                    : BorderSide.none,
+                    : _view == PlaylistViewMode.list && folder != null
+                        ? BorderSide(
+                            color:
+                                scheme.outlineVariant.withValues(alpha: .38),
+                          )
+                        : BorderSide.none,
               ),
               borderOnForeground: true,
               child: Semantics(
@@ -1918,9 +1938,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
               ),
             ),
           );
-          return compact && folder != null && _view == PlaylistViewMode.list
+          return folder != null && _view == PlaylistViewMode.list
               ? Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
+                  padding: const EdgeInsets.only(bottom: 6),
                   child: PlaylistItemArrival(child: line))
               : PlaylistItemArrival(child: line);
         },
@@ -1938,8 +1958,39 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
     );
   }
 
-  Widget _breadcrumbs(Playlist? current) => AppHorizontalWheelRegion(
-          child: SingleChildScrollView(
+  Widget _breadcrumbs(Playlist? current) {
+    final scheme = Theme.of(context).colorScheme;
+    ButtonStyle crumbStyle({required bool active}) => ButtonStyle(
+          minimumSize: const WidgetStatePropertyAll(Size(44, 38)),
+          visualDensity: VisualDensity.standard,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape: const WidgetStatePropertyAll(AppShape.pill),
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+          ),
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (active) {
+              return scheme.secondaryContainer.withValues(alpha: .72);
+            }
+            if (states.contains(WidgetState.hovered)) {
+              return scheme.secondaryContainer.withValues(alpha: .42);
+            }
+            return scheme.surfaceContainerHighest.withValues(alpha: .36);
+          }),
+          foregroundColor: WidgetStatePropertyAll(
+            active ? scheme.onSecondaryContainer : scheme.primary,
+          ),
+          iconColor: WidgetStatePropertyAll(
+            active ? scheme.onSecondaryContainer : scheme.primary,
+          ),
+          textStyle: WidgetStatePropertyAll(
+            Theme.of(context).textTheme.labelLarge?.copyWith(
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                ),
+          ),
+        );
+    return AppHorizontalWheelRegion(
+      child: SingleChildScrollView(
         key: const ValueKey('playlist-breadcrumb-scroll'),
         scrollDirection: Axis.horizontal,
         child: Row(
@@ -1949,21 +2000,22 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
               targetKey: 'playlist-breadcrumb-drop-root',
               child: TextButton.icon(
                 key: const ValueKey('playlist-breadcrumb-root'),
-                style: TextButton.styleFrom(
-                  minimumSize: const Size(44, 44),
-                  visualDensity: VisualDensity.standard,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                ),
+                style: crumbStyle(active: current == null),
                 onPressed: current == null ? null : () => _navigate(null),
-                icon: const Icon(Icons.library_music_outlined),
+                icon: const Icon(Icons.library_music_outlined, size: 18),
                 label: Text(ui("全部歌单")),
               ),
             ),
             if (current != null)
               for (final ancestor in current.pathFromRoot) ...[
-                const Icon(Icons.chevron_right, size: 18),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: Icon(
+                    Icons.chevron_right_rounded,
+                    size: 18,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
                 _folderTarget(
                   target: ancestor,
                   targetKey: 'playlist-breadcrumb-drop-${ancestor.id}',
@@ -1973,13 +2025,7 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                       constraints: const BoxConstraints(maxWidth: 220),
                       child: TextButton(
                         key: ValueKey('playlist-breadcrumb-${ancestor.id}'),
-                        style: TextButton.styleFrom(
-                          minimumSize: const Size(44, 44),
-                          visualDensity: VisualDensity.standard,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 6),
-                        ),
+                        style: crumbStyle(active: ancestor.id == current.id),
                         onPressed: ancestor.id == current.id
                             ? null
                             : () => _navigate(ancestor),
@@ -1992,7 +2038,9 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
               ],
           ],
         ),
-      ));
+      ),
+    );
+  }
 
   Widget _headerActions(Playlist? current, List<_PlaylistRowData> rows,
       int selectedCount, List<Audio> queue) {
@@ -2385,8 +2433,67 @@ class _PlaylistBrowserState extends State<PlaylistBrowser> {
                                   child: AppEntrance(
                                     identity: 'playlist-empty',
                                     order: 2,
-                                    child:
-                                        Text(ui("这里还没有项目。可以新建子歌单、添加歌曲或拖入歌单。")),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(24),
+                                      child: ConstrainedBox(
+                                        constraints: const BoxConstraints(
+                                            maxWidth: 420),
+                                        child: DecoratedBox(
+                                          decoration: BoxDecoration(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .surfaceContainerLow,
+                                            borderRadius: AppShape.cardRadius,
+                                            border: Border.all(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .outlineVariant
+                                                  .withValues(alpha: .38),
+                                            ),
+                                          ),
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 28, vertical: 28),
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                DecoratedBox(
+                                                  decoration: BoxDecoration(
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .primaryContainer,
+                                                    shape: BoxShape.circle,
+                                                  ),
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.all(
+                                                            14),
+                                                    child: Icon(
+                                                      Icons
+                                                          .queue_music_rounded,
+                                                      size: 28,
+                                                      color: Theme.of(context)
+                                                          .colorScheme
+                                                          .onPrimaryContainer,
+                                                    ),
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 14),
+                                                Text(
+                                                  ui("这里还没有项目。可以新建子歌单、添加歌曲或拖入歌单。"),
+                                                  textAlign: TextAlign.center,
+                                                  style: TextStyle(
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .onSurfaceVariant,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),

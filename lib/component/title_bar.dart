@@ -466,9 +466,41 @@ class _WindowControllsState extends State<WindowControlls> with WindowListener {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final foreground = WindowChromeTheme.foregroundOf(context);
-    final controlStyle = IconButton.styleFrom(
-      foregroundColor: foreground,
-      disabledForegroundColor: foreground.withValues(alpha: .38),
+    final scheme = Theme.of(context).colorScheme;
+    final controlStyle = ButtonStyle(
+      shape: const WidgetStatePropertyAll(StadiumBorder()),
+      foregroundColor: WidgetStateProperty.resolveWith((states) =>
+          states.contains(WidgetState.disabled)
+              ? foreground.withValues(alpha: .38)
+              : foreground),
+      overlayColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.disabled)) return Colors.transparent;
+        if (states.contains(WidgetState.pressed)) {
+          return foreground.withValues(alpha: .14);
+        }
+        if (states.contains(WidgetState.hovered)) {
+          return foreground.withValues(alpha: .08);
+        }
+        return Colors.transparent;
+      }),
+    );
+    final closeStyle = ButtonStyle(
+      shape: const WidgetStatePropertyAll(StadiumBorder()),
+      backgroundColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.pressed)) return scheme.error;
+        if (states.contains(WidgetState.hovered)) {
+          return scheme.error.withValues(alpha: .88);
+        }
+        return Colors.transparent;
+      }),
+      foregroundColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.hovered) ||
+            states.contains(WidgetState.pressed)) {
+          return scheme.onError;
+        }
+        return foreground;
+      }),
+      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
     );
     return ListenableBuilder(
       listenable: Listenable.merge([
@@ -555,7 +587,7 @@ class _WindowControllsState extends State<WindowControlls> with WindowListener {
             IconButton(
               tooltip: ui("关闭窗口"),
               onPressed: requestAppClose,
-              style: controlStyle,
+              style: closeStyle,
               icon: const AppEntrance(
                 identity: 'title-close',
                 order: 7,

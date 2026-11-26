@@ -14,6 +14,7 @@ class EqPresetStore {
   static Future<EqPresetStore> get instance =>
       _instance ??= (() async => EqPresetStore(
           File(p.join((await getAppDataDir()).path, 'eq_presets.json'))))();
+
   static void validatePreset(Map value) {
     final centers = value['frequencies'],
         gains = value['gains'],
@@ -35,21 +36,25 @@ class EqPresetStore {
         centers is! List ||
         centers.length != 10 ||
         gains is! List ||
-        gains.length != 10) throw const FormatException('Invalid EQ preset');
+        gains.length != 10) {
+      throw const FormatException('Invalid EQ preset');
+    }
     for (var i = 0; i < 10; i++) {
       if (centers[i] != BassPlayer.eqBandCenters[i] ||
           gains[i] is! num ||
           !(gains[i] as num).isFinite ||
-          (gains[i] as num).abs() > 15)
+          (gains[i] as num).abs() > 15) {
         throw const FormatException(
             'EQ bands must match and gains must be within ±15 dB');
+      }
     }
   }
 
   static void validate(Map<String, dynamic> root) {
     if (root['version'] != 1 ||
-        (root['presets'] != null && root['presets'] is! List))
+        (root['presets'] != null && root['presets'] is! List)) {
       throw const FormatException('Invalid EQ store');
+    }
     final list = root['presets'] as List? ?? [];
     final ids = <String>{};
     if (list.length > 100) throw const FormatException('最多 100 个用户 EQ 预设');
@@ -64,13 +69,16 @@ class EqPresetStore {
       ((await store.snapshot())['presets'] as List? ?? [])
           .map((v) => Map<String, dynamic>.from(v as Map))
           .toList();
+
   Future<void> add(String name, List<double> gains) => store.update((root) {
         final list = root.putIfAbsent('presets', () => []) as List;
         final names = {for (final p in list) p['name']};
-        var next = name.trim();
+        final baseName =
+            name.trim().isEmpty ? 'EQ ${list.length + 1}' : name.trim();
+        var next = baseName;
         var count = 1;
         while (names.contains(next)) {
-          next = '${name.trim()} (${count++})';
+          next = '$baseName (${count++})';
         }
         list.add({
           'version': 1,
@@ -81,20 +89,36 @@ class EqPresetStore {
           'gains': List.of(gains)
         });
       });
-  Future<void> rename(String id, String name) => store.update((root) {
-        for (final v in root['presets'] as List? ?? []) {
-          if (v['id'] == id) v['name'] = name.trim();
-        }
-      });
+
+  Future<void> rename(String id, String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      throw const FormatException('EQ 预设名称不能为空');
+    }
+    return store.update((root) {
+      for (final v in root['presets'] as List? ?? []) {
+        if (v['id'] == id) v['name'] = trimmed;
+      }
+    });
+  }
+
   Future<void> remove(String id) => store.update((root) {
         (root['presets'] as List? ?? []).removeWhere((p) => p['id'] == id);
       });
-  static Future<Map<String, dynamic>> readExchange(File file) async {
-    if (await file.length() > 65536)
-      throw const FormatException('EQ 文件超过 64 KiB');
-    final raw = jsonDecode(await file.readAsString());
+
+  static Map<String, dynamic> parseExchangeString(String text) {
+    final normalized =
+        text.startsWith('\uFEFF') ? text.substring(1) : text;
+    final raw = jsonDecode(normalized);
     if (raw is! Map) throw const FormatException('Invalid EQ file');
     validatePreset(raw);
     return Map<String, dynamic>.from(raw);
+  }
+
+  static Future<Map<String, dynamic>> readExchange(File file) async {
+    if (await file.length() > 65536) {
+      throw const FormatException('EQ 文件超过 64 KiB');
+    }
+    return parseExchangeString(await file.readAsString());
   }
 }

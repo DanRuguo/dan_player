@@ -6,6 +6,7 @@ import 'package:dan_player/component/settings_section_visibility.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/player_experience_preferences.dart';
 import 'package:dan_player/lyric/japanese_reading_preferences.dart';
+import 'package:dan_player/lyric/english_phonetic_preferences.dart';
 import 'package:desktop_lyric/desktop_lyric_appearance.dart';
 import 'package:desktop_lyric/component/lyric_letter_spacing_control.dart';
 import 'package:desktop_lyric/component/lyric_letter_spacing_preview.dart';
@@ -24,12 +25,16 @@ class LyricExperienceSettings extends StatefulWidget {
       this.preferences,
       this.persist,
       this.appearance,
-      this.japaneseReadings});
+      this.japaneseReadings,
+      this.englishPhonetics,
+      this.includeAnnotations = true});
 
   final ValueNotifier<PlayerExperiencePreferences>? preferences;
   final Future<void> Function()? persist;
   final ValueNotifier<DesktopLyricAppearance>? appearance;
   final ValueNotifier<JapaneseReadingPreferences>? japaneseReadings;
+  final ValueNotifier<EnglishPhoneticPreferences>? englishPhonetics;
+  final bool includeAnnotations;
 
   @override
   State<LyricExperienceSettings> createState() =>
@@ -41,6 +46,8 @@ class _LyricExperienceSettingsState extends State<LyricExperienceSettings> {
   bool _saveFailed = false;
   int? _japaneseReadingPointer;
   bool _japaneseReadingPointerCancelling = false;
+  int? _englishPhoneticPointer;
+  bool _englishPhoneticPointerCancelling = false;
 
   @override
   void didChangeDependencies() {
@@ -55,12 +62,21 @@ class _LyricExperienceSettingsState extends State<LyricExperienceSettings> {
       // and make the SDK's reaction callback call setState during build.
       WidgetsBinding.instance.cancelPointer(pointer);
     }
+    final enPointer = _englishPhoneticPointer;
+    if (!SettingsSectionVisibility.isVisibleOf(context) &&
+        enPointer != null &&
+        !_englishPhoneticPointerCancelling) {
+      _englishPhoneticPointerCancelling = true;
+      WidgetsBinding.instance.cancelPointer(enPointer);
+    }
   }
 
   @override
   void dispose() {
     _japaneseReadingPointer = null;
     _japaneseReadingPointerCancelling = false;
+    _englishPhoneticPointer = null;
+    _englishPhoneticPointerCancelling = false;
     super.dispose();
   }
 
@@ -70,12 +86,15 @@ class _LyricExperienceSettingsState extends State<LyricExperienceSettings> {
       widget.appearance ?? AppSettings.instance.desktopLyricAppearance;
   ValueNotifier<JapaneseReadingPreferences> get _japaneseReadings =>
       widget.japaneseReadings ?? AppSettings.instance.japaneseReadings;
+  ValueNotifier<EnglishPhoneticPreferences> get _englishPhonetics =>
+      widget.englishPhonetics ?? AppSettings.instance.englishPhonetics;
 
   Future<void> _save() async {
     final revision = ++_saveRevision;
     final preferences = _preferences;
     final appearance = _appearance;
     final readings = _japaneseReadings;
+    final phonetics = _englishPhonetics;
     setState(() => _saveFailed = false);
     try {
       await (widget.persist ??
@@ -86,7 +105,8 @@ class _LyricExperienceSettingsState extends State<LyricExperienceSettings> {
           revision != _saveRevision ||
           !identical(preferences, _preferences) ||
           !identical(appearance, _appearance) ||
-          !identical(readings, _japaneseReadings)) {
+          !identical(readings, _japaneseReadings) ||
+          !identical(phonetics, _englishPhonetics)) {
         return;
       }
       setState(() => _saveFailed = true);
@@ -171,10 +191,11 @@ class _LyricExperienceSettingsState extends State<LyricExperienceSettings> {
                       ],
                     ),
                   ),
-                  _lyricSettingsDivider,
-                  ValueListenableBuilder(
-                    valueListenable: _japaneseReadings,
-                    builder: (context, readings, _) {
+                  if (widget.includeAnnotations) ...[
+                    _lyricSettingsDivider,
+                    ValueListenableBuilder(
+                      valueListenable: _japaneseReadings,
+                      builder: (context, readings, _) {
                       final visible =
                           SettingsSectionVisibility.isVisibleOf(context);
                       return Listener(
@@ -229,6 +250,101 @@ class _LyricExperienceSettingsState extends State<LyricExperienceSettings> {
                     },
                   ),
                   _lyricSettingsDivider,
+                  ValueListenableBuilder(
+                    valueListenable: _englishPhonetics,
+                    builder: (context, phonetics, _) {
+                      final visible =
+                          SettingsSectionVisibility.isVisibleOf(context);
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Listener(
+                            onPointerDown: (event) {
+                              if (_englishPhoneticPointer == null) {
+                                _englishPhoneticPointer = event.pointer;
+                                _englishPhoneticPointerCancelling = false;
+                              }
+                            },
+                            onPointerUp: (event) {
+                              if (event.pointer == _englishPhoneticPointer) {
+                                _englishPhoneticPointer = null;
+                                _englishPhoneticPointerCancelling = false;
+                              }
+                            },
+                            onPointerCancel: (event) {
+                              if (event.pointer == _englishPhoneticPointer) {
+                                _englishPhoneticPointer = null;
+                                _englishPhoneticPointerCancelling = false;
+                              }
+                            },
+                            child: SettingsSwitchTile(
+                              surface: false,
+                              contentPadding: EdgeInsets.zero,
+                              icon: Icons.spellcheck_outlined,
+                              controlKey: const ValueKey(
+                                  'english-phonetics-auto-switch'),
+                              title: Text(ui('自动生成英语音标')),
+                              subtitle: Text(ui(
+                                  '离线匹配英语单词音标并显示在歌词上方，支持词形变化与常见缩写；保留已有注音和原歌词。')),
+                              value: phonetics.enabled,
+                              onChanged: (value) {
+                                if (!mounted ||
+                                    !visible ||
+                                    _englishPhoneticPointer != null ||
+                                    !SettingsSectionVisibility.isVisibleOf(
+                                        context)) {
+                                  return;
+                                }
+                                setEnglishPhoneticGeneration(
+                                    preferences: _englishPhonetics,
+                                    appearance: _appearance,
+                                    enabled: value);
+                                unawaited(_save());
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          SettingsTile(
+                            surface: false,
+                            description: ui('英语音标样式'),
+                            subtitle: ui('切换音标显示边框样式，切换后立即生效且无需重新生成缓存。'),
+                            icon: Icons.text_format_outlined,
+                            action: AppSegmentedControl<EnglishPhoneticStyle>(
+                              key: const ValueKey('english-phonetics-style'),
+                              value: phonetics.style,
+                              semanticLabel: ui('英语音标样式'),
+                              options: [
+                                AppSegmentOption(
+                                  value: EnglishPhoneticStyle.plain,
+                                  label: ui('纯音标'),
+                                  icon: Icons.short_text_outlined,
+                                ),
+                                AppSegmentOption(
+                                  value: EnglishPhoneticStyle.slashes,
+                                  label: ui('斜线 /…/'),
+                                  icon: Icons.code_outlined,
+                                ),
+                                AppSegmentOption(
+                                  value: EnglishPhoneticStyle.brackets,
+                                  label: ui('方括号 […]'),
+                                  icon: Icons.data_array_outlined,
+                                ),
+                              ],
+                              onChanged: (value) {
+                                final next =
+                                    _englishPhonetics.value.copyWith(style: value);
+                                if (next == _englishPhonetics.value) return;
+                                _englishPhonetics.value = next;
+                                unawaited(_save());
+                              },
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                  ],
+                  _lyricSettingsDivider,
                   SettingsTile(
                     surface: false,
                     description: ui('本地歌词多轨顺序'),
@@ -237,7 +353,6 @@ class _LyricExperienceSettingsState extends State<LyricExperienceSettings> {
                     icon: Icons.sort_outlined,
                     action: AppSegmentedControl<LocalLyricLineOrder>(
                       key: const ValueKey('local-lyric-line-order'),
-                      maxWidth: 280,
                       value: AppSettings.instance.localLyricLineOrder,
                       semanticLabel: ui('本地歌词多轨顺序'),
                       options: [
@@ -275,7 +390,6 @@ class _LyricExperienceSettingsState extends State<LyricExperienceSettings> {
                         icon: Icons.graphic_eq_outlined,
                         action: AppSegmentedControl<NowPlayingProgressStyle>(
                           key: const ValueKey('now-playing-progress-style'),
-                          maxWidth: 280,
                           value: style,
                           semanticLabel: ui('歌词页进度条'),
                           options: [
@@ -310,7 +424,6 @@ class _LyricExperienceSettingsState extends State<LyricExperienceSettings> {
                             icon: Icons.view_week_outlined,
                             action: AppSegmentedControl<WaveformBarDensity>(
                               key: const ValueKey('waveform-bar-density'),
-                              maxWidth: 280,
                               value: density,
                               semanticLabel: ui('波形音柱密度'),
                               options: [

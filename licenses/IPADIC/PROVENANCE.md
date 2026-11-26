@@ -16,16 +16,17 @@ explicit, supports a manual local copy, and does not install another executable.
 - Original archive SHA-256: `5ed4bba6b429030b0387df67d40d5751d35dedef0306f4bac6d957cad5f04b72`
 - Source dictionary: `mecab-ipadic-2.7.0-20070801`, in Lindera format version 2.
 - Generated resource: `rust/assets/ipadic-reading.bin.gz`
-- Resource bytes: `7180257`
-- Resource SHA-256: `a8acd8b6352774fe3f6ac3fdbec59313ce04b548dad84340c17f0ee4bfab6e43`
+- Resource bytes: `5185623`
+- Resource SHA-256: `bc2e100b3d11e41038dd3fbaacfbd843c081a3d18c6105320220b36a667b7ee9`
 
 All 392,126 word entries, trie, values, costs, character definitions, unknown-word
 rules and metadata are retained. Of the nine word-detail fields, only the reading
 is used by this feature. The other eight are replaced with `*`; duplicate detail
-records share storage and the word-detail index is rewritten accordingly.
-Vocabulary, segmentation costs and readings are not trimmed. The packed resource
-contains nine length-prefixed parts after the `DANIPAD2` header and uses
-deterministic gzip compression.
+records share compact 1-byte Katakana storage, and integer tables (`vals`, `valsidx`,
+`wordsidx`, `matrix.mtx`) use lossless delta/2D prediction and byte-plane splitting
+after the `DANIPAD3` header before deterministic gzip compression, reconstructing
+identical Lindera runtime buffers on load. Legacy `DANIPAD2` (`a8acd8b6...`) remains
+accepted for previously installed slim-installer copies.
 
 Rebuild from the pinned original archive with:
 

@@ -83,6 +83,7 @@ class CoverCache {
   Directory? _dir;
   final Map<String, Future<ImageProvider?>> _inflight = {};
   final LinkedHashMap<String, Future<ImageProvider?>> _ready = LinkedHashMap();
+  final LinkedHashMap<String, ImageProvider> _readyProviders = LinkedHashMap();
   final LinkedHashMap<String, DateTime> _negativeUntil = LinkedHashMap();
   final Queue<Completer<void>> _readWaiters = Queue();
   int _activeReads = 0;
@@ -157,6 +158,30 @@ class CoverCache {
       ? '$modified'
       : '${modified}f${stableHash(fingerprint)}';
 
+  /// Synchronously inspects in-memory positive or negative cache state without
+  /// scheduling microtasks, disk I/O or native decoding.
+  ({bool hit, ImageProvider? provider}) peekImageFor({
+    required String audioPath,
+    required int modified,
+    String? fingerprint,
+    required int width,
+    required int height,
+  }) {
+    final key = _fileName(audioPath, modified, width, height, fingerprint);
+    final retryAt = _negativeUntil[key];
+    if (retryAt != null && retryAt.isAfter(_clock())) {
+      return (hit: true, provider: null);
+    }
+    final provider = _readyProviders.remove(key);
+    if (provider != null) {
+      _readyProviders[key] = provider;
+      final readyFuture = _ready.remove(key);
+      if (readyFuture != null) _ready[key] = readyFuture;
+      return (hit: true, provider: provider);
+    }
+    return (hit: false, provider: null);
+  }
+
   Future<ImageProvider?> imageFor({
     required String audioPath,
     required int modified,
@@ -169,11 +194,15 @@ class CoverCache {
     final retryAt = _negativeUntil.remove(key);
     if (retryAt != null && retryAt.isAfter(_clock())) {
       _negativeUntil[key] = retryAt;
-      return Future<ImageProvider?>.value(null);
+      return SynchronousFuture<ImageProvider?>(null);
     }
     final cached = _ready.remove(key);
     if (cached != null) {
       _ready[key] = cached;
+      final cachedProvider = _readyProviders.remove(key);
+      if (cachedProvider != null) {
+        _readyProviders[key] = cachedProvider;
+      }
       return cached;
     }
     final existing = _inflight[key];
@@ -192,9 +221,14 @@ class CoverCache {
           image is! MemoryImage &&
           !(image is AnimatedArtworkSource && image.source is MemoryImage)) {
         _negativeUntil.remove(key);
-        _ready[key] = request;
-        while (_ready.length > maxEntries) {
-          _ready.remove(_ready.keys.first);
+        if (maxEntries > 0) {
+          _ready[key] = SynchronousFuture<ImageProvider?>(image);
+          _readyProviders[key] = image;
+          while (_ready.length > maxEntries) {
+            final oldest = _ready.keys.first;
+            _ready.remove(oldest);
+            _readyProviders.remove(oldest);
+          }
         }
       } else if (image == null && failureRetryDelay > Duration.zero) {
         _negativeUntil[key] = _clock().add(failureRetryDelay);
@@ -305,6 +339,7 @@ class CoverCache {
           files--;
           bytes -= item.bytes;
           _ready.remove(name);
+          _readyProviders.remove(name);
           removed++;
         } catch (_) {}
       }
@@ -326,6 +361,7 @@ class CoverCache {
         if (entry.key.contains("_${hash}_")) entry.value,
     ];
     _ready.removeWhere((key, _) => key.contains("_${hash}_"));
+    _readyProviders.removeWhere((key, _) => key.contains("_${hash}_"));
     _negativeUntil.removeWhere((key, _) => key.contains("_${hash}_"));
     for (final future in evicted) {
       await (await future)?.evict();
@@ -356,6 +392,7 @@ class CoverCache {
     _generations.clear();
     _inflight.clear();
     _ready.clear();
+    _readyProviders.clear();
     _negativeUntil.clear();
 
     try {

@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 # The contextual IPADIC dictionary stays separate from the Rust DLL. Pinned
 # supplemental lexical/character readings stay in the same optional component.
 function Get-BundledJapaneseReadings {
@@ -19,7 +19,7 @@ function Get-BundledJapaneseReadings {
         throw 'Japanese reading resource differs from its pinned derivation.'
     }
     $readingSupplements = @()
-    $readingSupplementPaths = @('rust/assets/supplemental-reading-v1.json.gz', 'rust/assets/kanji-reading-v1.json.gz')
+    $readingSupplementPaths = @('rust/assets/supplemental-reading-v2.bin.gz', 'rust/assets/kanji-reading-v1.json.gz')
     foreach ($readingSupplement in $readingCatalog.supplements) {
         if ($readingSupplement.path -cnotin $readingSupplementPaths -or
             $readingSupplement.sha256 -cnotmatch '^[0-9a-f]{64}$' -or

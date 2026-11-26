@@ -172,6 +172,7 @@ class BackupRestorePreservation {
     return relative == planName ||
         relative.startsWith('.dan-player-') ||
         relative.startsWith('updates/') ||
+        relative.startsWith('logs/') ||
         relative.startsWith('library_migrations/') ||
         relative.endsWith('.tmp') ||
         relative.endsWith('.pending') ||

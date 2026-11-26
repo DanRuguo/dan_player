@@ -136,10 +136,9 @@ class _PlaylistSongPickerState extends State<PlaylistSongPicker> {
                               autofocus: true,
                               onChanged: (query) => setState(
                                   () => _query = query.trim().toLowerCase()),
-                              decoration: InputDecoration(
-                                prefixIcon: const Icon(Icons.search),
+                              decoration: AppShape.searchDecoration(
+                                context,
                                 hintText: ui("搜索标题、歌手或专辑"),
-                                border: AppShape.inputBorder,
                               ),
                             ),
                           );
@@ -158,7 +157,7 @@ class _PlaylistSongPickerState extends State<PlaylistSongPicker> {
                             onDirectionChanged: (value) =>
                                 setState(() => _direction = value),
                             options: _sortOptions,
-                            maxWidth: 220,
+                            maxWidth: 280,
                             helpText: _sort == AudioSortField.original
                                 ? _sort.note
                                 : [

@@ -30,44 +30,49 @@ class LibrarySearchField extends StatelessWidget {
           textInputAction: TextInputAction.search,
           onSubmitted: onSubmitted,
           onChanged: onChanged,
-          decoration: InputDecoration(
+          decoration: AppShape.searchDecoration(
+            context,
             hintText: ui('搜索本地曲库和联网音乐'),
-            border: AppShape.inputBorder,
-            suffixIcon: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (controller.text.isNotEmpty)
-                  IconButton(
-                    tooltip: ui('清除搜索'),
-                    onPressed: () {
-                      controller.clear();
-                      onChanged('');
-                    },
-                    icon: const Icon(Symbols.close),
-                  ),
-                if (busy)
-                  Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: SizedBox.square(
-                      dimension: 20,
-                      child: AppMotion.enabled(context, MotionKind.feedback)
-                          ? CircularProgressIndicator(
-                              strokeWidth: 2,
-                              semanticsLabel: ui('正在搜索'),
-                            )
-                          : Icon(Symbols.hourglass_top,
-                              size: 20, semanticLabel: ui('正在搜索')),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+            suffixIcon: Padding(
+              padding: const EdgeInsetsDirectional.only(end: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (controller.text.isNotEmpty)
+                    IconButton(
+                      tooltip: ui('清除搜索'),
+                      onPressed: () {
+                        controller.clear();
+                        onChanged('');
+                      },
+                      icon: const Icon(Symbols.close, size: 19),
                     ),
-                  )
-                else
-                  IconButton(
-                    tooltip: ui('搜索'),
-                    onPressed: controller.text.trim().isEmpty
-                        ? null
-                        : () => onSubmitted(controller.text),
-                    icon: const Icon(Symbols.search),
-                  ),
-              ],
+                  if (busy)
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: SizedBox.square(
+                        dimension: 20,
+                        child: AppMotion.enabled(context, MotionKind.feedback)
+                            ? CircularProgressIndicator(
+                                strokeWidth: 2,
+                                semanticsLabel: ui('正在搜索'),
+                              )
+                            : Icon(Symbols.hourglass_top,
+                                size: 20, semanticLabel: ui('正在搜索')),
+                      ),
+                    )
+                  else
+                    IconButton(
+                      tooltip: ui('搜索'),
+                      onPressed: controller.text.trim().isEmpty
+                          ? null
+                          : () => onSubmitted(controller.text),
+                      icon: const Icon(Symbols.arrow_forward, size: 20),
+                    ),
+                ],
+              ),
             ),
           ),
         ),

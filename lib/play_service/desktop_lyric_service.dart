@@ -822,6 +822,12 @@ class DesktopLyricService extends ChangeNotifier {
             msg.DesktopJapaneseReadingSpan(
                 start: span.start, end: span.end, text: span.text),
         ],
+        englishPhonetic: line.englishPhonetic,
+        englishPhoneticSpans: [
+          for (final span in line.englishPhoneticSpans)
+            msg.DesktopEnglishPhoneticSpan(
+                start: span.start, end: span.end, text: span.text),
+        ],
         words: words,
       ),
     );

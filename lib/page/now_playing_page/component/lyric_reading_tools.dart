@@ -1,5 +1,6 @@
 import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/app_checkbox_menu_button.dart';
+import 'package:dan_player/lyric/english_lyric_phonetics.dart';
 import 'package:dan_player/lyric/japanese_lyric_readings.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/plain_lyric.dart';
@@ -27,6 +28,19 @@ void showJapaneseReadingResultNotice(
   if (message != null) showAppNotice(ui(message), context: context);
 }
 
+void showEnglishPhoneticResultNotice(
+    BuildContext context, EnglishPhoneticResult result) {
+  final message = switch (result) {
+    EnglishPhoneticResult.applied ||
+    EnglishPhoneticResult.unchanged ||
+    EnglishPhoneticResult.stale =>
+      null,
+    EnglishPhoneticResult.unavailable => '当前无法加载英语音标词典，请稍后重试',
+    EnglishPhoneticResult.tooLarge => '歌词过长，无法一次生成英语音标',
+  };
+  if (message != null) showAppNotice(ui(message), context: context);
+}
+
 Widget _readingMenuLabel(BuildContext context, String label) => ConstrainedBox(
       constraints: BoxConstraints(
           maxWidth: (MediaQuery.sizeOf(context).width - 112).clamp(120, 320)),
@@ -47,6 +61,7 @@ String lyricReadingText(LyricLine line,
     {bool translation = true,
     bool romanization = true,
     bool japaneseReading = true,
+    bool englishPhonetic = true,
     bool timestamp = false}) {
   final primary = switch (line) {
     SyncLyricLine() => line.content,
@@ -63,6 +78,8 @@ String lyricReadingText(LyricLine line,
       line.romanization!,
     if (japaneseReading && (line.japaneseReading?.trim().isNotEmpty ?? false))
       line.japaneseReading!,
+    if (englishPhonetic && (line.englishPhonetic?.trim().isNotEmpty ?? false))
+      line.englishPhonetic!,
     if (primary.trim().isNotEmpty)
       '${timestamp ? '[${lyricReadingTimestamp(line.start)}] ' : ''}$primary',
     if (translation) ...translations.where((text) => text.trim().isNotEmpty),
@@ -95,7 +112,9 @@ class LyricReadingMenu extends StatelessWidget {
       this.onFind,
       this.onPracticeSegment,
       this.onToggleJapaneseReading,
-      this.japaneseReadingsBusy});
+      this.japaneseReadingsBusy,
+      this.onToggleEnglishPhonetics,
+      this.englishPhoneticsBusy});
   final LyricViewController controller;
   final Future<Lyric?>? Function() readLyric;
   final Future<void> Function(NavigatorState navigator)? onCreateCard;
@@ -104,6 +123,9 @@ class LyricReadingMenu extends StatelessWidget {
   final Future<void> Function(NavigatorState navigator)?
       onToggleJapaneseReading;
   final ValueListenable<bool>? japaneseReadingsBusy;
+  final Future<void> Function(NavigatorState navigator)?
+      onToggleEnglishPhonetics;
+  final ValueListenable<bool>? englishPhoneticsBusy;
 
   Future<void> _copyAll(BuildContext context) async {
     final future = readLyric();
@@ -120,6 +142,7 @@ class LyricReadingMenu extends StatelessWidget {
                       translation: controller.showTranslation,
                       romanization: controller.showRomanization,
                       japaneseReading: controller.showJapaneseReading,
+                      englishPhonetic: controller.showEnglishPhonetics,
                       timestamp:
                           controller.showTimestamps && lyric is! PlainLyric))
                   .where((text) => text.isNotEmpty)
@@ -138,13 +161,19 @@ class LyricReadingMenu extends StatelessWidget {
     final navigator = onCreateCard == null &&
             onPracticeSegment == null &&
             onFind == null &&
-            onToggleJapaneseReading == null
+            onToggleJapaneseReading == null &&
+            onToggleEnglishPhonetics == null
         ? null
         : Navigator.of(context, rootNavigator: true);
+    final listenables = <Listenable>[
+      controller,
+      if (japaneseReadingsBusy != null) japaneseReadingsBusy!,
+      if (englishPhoneticsBusy != null) englishPhoneticsBusy!,
+    ];
     return ListenableBuilder(
-        listenable: japaneseReadingsBusy == null
+        listenable: listenables.length == 1
             ? controller
-            : Listenable.merge([controller, japaneseReadingsBusy!]),
+            : Listenable.merge(listenables),
         builder: (context, _) => AppMenuAnchor(
               menuChildren: [
                 AppCheckboxMenuButton(
@@ -168,6 +197,17 @@ class LyricReadingMenu extends StatelessWidget {
                       }
                     },
                     child: _readingMenuLabel(context, '显示日语假名')),
+                AppCheckboxMenuButton(
+                    key: const ValueKey('lyric-show-english-phonetics'),
+                    value: controller.showEnglishPhonetics,
+                    onChanged: (_) {
+                      if (onToggleEnglishPhonetics != null) {
+                        onToggleEnglishPhonetics!(navigator!);
+                      } else {
+                        controller.toggleEnglishPhoneticGeneration();
+                      }
+                    },
+                    child: _readingMenuLabel(context, '显示英语音标')),
                 AppCheckboxMenuButton(
                     value: controller.showTimestamps,
                     onChanged: (value) =>
@@ -263,7 +303,8 @@ class LyricLineReadingActions extends StatelessWidget {
                   lyricReadingText(line,
                       translation: controller.showTranslation,
                       romanization: controller.showRomanization,
-                      japaneseReading: controller.showJapaneseReading)),
+                      japaneseReading: controller.showJapaneseReading,
+                      englishPhonetic: controller.showEnglishPhonetics)),
               leadingIcon: const Icon(Symbols.content_copy),
               child: _readingMenuLabel(context, '复制这一句歌词')),
           if (timed)
@@ -274,6 +315,7 @@ class LyricLineReadingActions extends StatelessWidget {
                         translation: controller.showTranslation,
                         romanization: controller.showRomanization,
                         japaneseReading: controller.showJapaneseReading,
+                        englishPhonetic: controller.showEnglishPhonetics,
                         timestamp: true)),
                 leadingIcon: const Icon(Symbols.schedule),
                 child: _readingMenuLabel(context, '复制歌词与时间')),
@@ -293,7 +335,8 @@ class LyricLineReadingActions extends StatelessWidget {
                     lyricReadingText(line,
                         translation: controller.showTranslation,
                         romanization: controller.showRomanization,
-                        japaneseReading: controller.showJapaneseReading)),
+                        japaneseReading: controller.showJapaneseReading,
+                        englishPhonetic: controller.showEnglishPhonetics)),
           },
           child: GestureDetector(
             onSecondaryTapUp: (event) =>

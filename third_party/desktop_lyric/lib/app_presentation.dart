@@ -689,9 +689,13 @@ class _NoticeBubble extends StatelessWidget {
         child: Material(
           key: const ValueKey('app-notice-bubble'),
           color: background,
+          surfaceTintColor: Colors.transparent,
           elevation: 6,
-          shadowColor: scheme.shadow.withValues(alpha: .22),
-          borderRadius: BorderRadius.circular(16),
+          shadowColor: scheme.shadow.withValues(alpha: .24),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(layout.maxLines == 1 ? 999 : 20),
+            side: BorderSide(color: foreground.withValues(alpha: .16)),
+          ),
           clipBehavior: Clip.antiAlias,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -708,10 +712,8 @@ class _NoticeBubble extends StatelessWidget {
                 child: Text(notice.text,
                     maxLines: layout.maxLines,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.copyWith(color: foreground)),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: foreground, fontWeight: FontWeight.w500)),
               )),
               if (layout.actionWidth > 0)
                 SizedBox(

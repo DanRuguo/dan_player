@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 
 import 'package:dan_player/component/app_motion.dart';
-import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -206,14 +205,21 @@ class _CurrentRowState extends State<_CurrentRow>
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final baseAlpha = _current ? .06 : 0.0;
+    final isDark = scheme.brightness == Brightness.dark;
+    const rowRadius = BorderRadius.all(Radius.circular(14));
+    final activeBase =
+        scheme.primaryContainer.withValues(alpha: isDark ? .24 : .34);
+    final activeSide = BorderSide(
+      color: scheme.primary.withValues(alpha: isDark ? .26 : .20),
+    );
     final controller = _pulseController;
     if (controller == null) {
       return Material(
-        color: _current
-            ? scheme.primary.withValues(alpha: baseAlpha)
-            : Colors.transparent,
-        borderRadius: AppShape.controlRadius,
+        color: _current ? activeBase : Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: rowRadius,
+          side: _current ? activeSide : BorderSide.none,
+        ),
         animationDuration:
             AppMotion.duration(context, MotionKind.feedback, AppMotion.quick),
         child: widget.child,
@@ -224,19 +230,23 @@ class _CurrentRowState extends State<_CurrentRow>
       child: widget.child,
       builder: (context, child) {
         final t = controller.value.clamp(0.0, 1.0);
-        final wave = t >= 1 ? 0.0 : math.pow(math.sin(math.pi * t), 2).toDouble();
-        final alpha = baseAlpha + .16 * wave;
-        final color = alpha > 0
-            ? scheme.primary.withValues(alpha: alpha)
-            : Colors.transparent;
+        final wave =
+            t >= 1 ? 0.0 : math.pow(math.sin(math.pi * t), 2).toDouble();
+        final baseColor = _current ? activeBase : Colors.transparent;
+        final color = wave > 0
+            ? Color.alphaBlend(
+                scheme.primary.withValues(alpha: .16 * wave),
+                baseColor,
+              )
+            : baseColor;
         final shape = RoundedRectangleBorder(
-          borderRadius: AppShape.controlRadius,
+          borderRadius: rowRadius,
           side: wave > .01
               ? BorderSide(
-                  color: scheme.primary.withValues(alpha: .35 * wave),
-                  width: 1,
+                  color: scheme.primary.withValues(alpha: .38 * wave),
+                  width: 1.2,
                 )
-              : BorderSide.none,
+              : (_current ? activeSide : BorderSide.none),
         );
         return Material(
           color: color,

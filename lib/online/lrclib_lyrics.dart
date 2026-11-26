@@ -193,7 +193,7 @@ List<LrclibRecord> parseLrclibSearchPayload(
 LrclibRecord? parseLrclibRecordPayload(Object? payload) {
   if (payload is! Map) return null;
   final id = _positiveInt(payload['id']);
-  final trackName = _text(payload['trackName']);
+  final trackName = _text(payload['trackName']) ?? _text(payload['name']);
   if (id == null || trackName == null) return null;
   final plain = _text(payload['plainLyrics']);
   final synced = _text(payload['syncedLyrics']);

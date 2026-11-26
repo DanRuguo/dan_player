@@ -316,7 +316,28 @@ class _CheckForUpdateState extends State<CheckForUpdate> {
               label: Text(ui("立即检查")),
               onPressed: _isChecking || _saving ? null : _check,
             ),
-            Text(ui("当前版本：{0}", [AppSettings.version])),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: Theme.of(context)
+                    .colorScheme
+                    .secondaryContainer
+                    .withValues(alpha: .64),
+                borderRadius: AppShape.pillRadius,
+              ),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: Text(
+                  ui("当前版本：{0}", [AppSettings.version]),
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSecondaryContainer,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ),
+            ),
             if (lastCheck != null)
               Text(
                 ui("上次检查：{0}", [_formatDateTime(lastCheck)]),

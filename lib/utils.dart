@@ -2,9 +2,10 @@
 
 import 'dart:collection';
 
-import 'package:flutter/foundation.dart';
 import 'package:dan_player/component/app_presentation.dart';
+import 'package:dan_player/log/app_log_service.dart';
 export 'package:dan_player/component/app_presentation.dart' show AppNoticeKind;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:pinyin/pinyin.dart';
@@ -149,11 +150,14 @@ void showAppNotice(
 }
 
 final LOGGER_MEMORY = MemoryOutput(
+  bufferSize: 120,
   secondOutput: kDebugMode ? ConsoleOutput() : null,
 );
 final LOGGER = Logger(
   filter: ProductionFilter(),
-  printer: SimplePrinter(colors: false),
-  output: LOGGER_MEMORY,
+  printer: SimplePrinter(colors: false, printTime: true),
+  output: AppLogService.instance.createLoggerOutput(
+    secondaryOutput: LOGGER_MEMORY,
+  ),
   level: Level.all,
 );

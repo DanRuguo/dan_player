@@ -26,12 +26,12 @@ class NowPlayingBarRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       child: LayoutBuilder(
           builder: (context, bounds) => Row(children: [
                 if (!forceShowQueue || bounds.maxWidth >= 300) ...[
                   leading,
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 14),
                 ],
                 Expanded(
                     child: AnimatedSwitcher(
@@ -53,19 +53,21 @@ class NowPlayingBarRow extends StatelessWidget {
                                 style: TextStyle(
                                     color: scheme.primary,
                                     fontSize: 15.5,
-                                    fontWeight: FontWeight.w600))),
+                                    fontWeight: FontWeight.w700))),
                         if (spectrum != null && bounds.maxWidth >= 400) ...[
                           const SizedBox(width: 8),
                           spectrum!,
                         ],
                       ]),
-                      if (subtitle.isNotEmpty)
+                      if (subtitle.isNotEmpty) ...[
+                        const SizedBox(height: 1.5),
                         Text(subtitle,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                                 color: scheme.onSurfaceVariant,
                                 fontSize: 12.5)),
+                      ],
                     ],
                   ),
                 )),

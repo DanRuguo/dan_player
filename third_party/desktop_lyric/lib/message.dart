@@ -358,6 +358,23 @@ class DesktopJapaneseReadingSpan implements LyricRubySpan {
           text: json['text'] as String? ?? '');
 }
 
+class DesktopEnglishPhoneticSpan implements LyricPhoneticSpan {
+  const DesktopEnglishPhoneticSpan(
+      {required this.start, required this.end, required this.text});
+  @override
+  final int start;
+  @override
+  final int end;
+  @override
+  final String text;
+  Map<String, Object> toJson() => {'start': start, 'end': end, 'text': text};
+  factory DesktopEnglishPhoneticSpan.fromJson(Map<String, dynamic> json) =>
+      DesktopEnglishPhoneticSpan(
+          start: (json['start'] as num?)?.toInt() ?? 0,
+          end: (json['end'] as num?)?.toInt() ?? 0,
+          text: json['text'] as String? ?? '');
+}
+
 class LyricLineTimelineMessage extends Message {
   final int sequence;
 
@@ -371,6 +388,8 @@ class LyricLineTimelineMessage extends Message {
   final String? romanization;
   final String? japaneseReading;
   final List<DesktopJapaneseReadingSpan> japaneseReadingSpans;
+  final String? englishPhonetic;
+  final List<DesktopEnglishPhoneticSpan> englishPhoneticSpans;
   final List<DesktopLyricWord> words;
 
   const LyricLineTimelineMessage({
@@ -384,6 +403,8 @@ class LyricLineTimelineMessage extends Message {
     this.romanization,
     this.japaneseReading,
     this.japaneseReadingSpans = const [],
+    this.englishPhonetic,
+    this.englishPhoneticSpans = const [],
     required this.words,
   });
 
@@ -405,6 +426,13 @@ class LyricLineTimelineMessage extends Message {
           ? List.unmodifiable((json['japaneseReadingSpans'] as List)
               .whereType<Map>()
               .map((span) => DesktopJapaneseReadingSpan.fromJson(
+                  Map<String, dynamic>.from(span))))
+          : const [],
+      englishPhonetic: json['englishPhonetic'] as String?,
+      englishPhoneticSpans: json['englishPhoneticSpans'] is List
+          ? List.unmodifiable((json['englishPhoneticSpans'] as List)
+              .whereType<Map>()
+              .map((span) => DesktopEnglishPhoneticSpan.fromJson(
                   Map<String, dynamic>.from(span))))
           : const [],
       words: rawWords is List
@@ -435,6 +463,11 @@ class LyricLineTimelineMessage extends Message {
         'japaneseReadingSpans': japaneseReadingSpans
             .map((span) => span.toJson())
             .toList(growable: false),
+        if (englishPhonetic != null) 'englishPhonetic': englishPhonetic,
+        if (englishPhoneticSpans.isNotEmpty)
+          'englishPhoneticSpans': englishPhoneticSpans
+              .map((span) => span.toJson())
+              .toList(growable: false),
         'words': words.map((word) => word.toJson()).toList(growable: false),
       };
 }

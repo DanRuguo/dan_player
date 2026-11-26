@@ -81,7 +81,7 @@ class PlaybackPitchControl extends StatelessWidget {
         IconButton.outlined(
           key: const ValueKey('playback-pitch-down'),
           tooltip: ui('降低一个半音'),
-          style: appToolbarControlStyle(context),
+          style: appToolbarControlStyle(context, iconOnly: true),
           onPressed: enabled && pitch > PlaybackPitch.min
               ? () => onChanged(
                   (pitch - 1).clamp(PlaybackPitch.min, PlaybackPitch.max))
@@ -90,7 +90,7 @@ class PlaybackPitchControl extends StatelessWidget {
         ),
         AppMenuAnchor(
           style:
-              const MenuStyle(shape: WidgetStatePropertyAll(AppShape.control)),
+              const MenuStyle(shape: WidgetStatePropertyAll(AppShape.surface)),
           menuChildren: playbackPitchMenuItems(
               context: context, pitch: pitch, onSelected: onChanged),
           builder: (context, controller, _) => OutlinedButton.icon(
@@ -103,15 +103,15 @@ class PlaybackPitchControl extends StatelessWidget {
             icon: const Icon(Icons.music_note_outlined),
             label: Row(mainAxisSize: MainAxisSize.min, children: [
               Flexible(child: Text(playbackPitchLabel(pitch))),
-              const SizedBox(width: 8),
-              const Icon(Icons.expand_more, size: 20),
+              const SizedBox(width: 6),
+              const Icon(Icons.expand_more_rounded, size: 20),
             ]),
           ),
         ),
         IconButton.outlined(
           key: const ValueKey('playback-pitch-up'),
           tooltip: ui('升高一个半音'),
-          style: appToolbarControlStyle(context),
+          style: appToolbarControlStyle(context, iconOnly: true),
           onPressed: enabled && pitch < PlaybackPitch.max
               ? () => onChanged(
                   (pitch + 1).clamp(PlaybackPitch.min, PlaybackPitch.max))

@@ -297,7 +297,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               _text(
                                   '音乐页、专辑、艺术家与分类详情页均高亮正在播放的歌曲；点击页头的定位图标可直接滚到当前播放的曲目，如被当前搜索筛选隐藏会自动清除筛选再定位。'),
                               _text(
-                                  '点击页头的定位图标时，目标曲目行会短暂以主题色高亮脉冲提示位置；专辑、艺术家与分类详情页顶部同时显示合集总时长。'),
+                                  '点击页头的定位图标时，目标曲目行会短暂以主题色高亮脉冲提示位置；专辑、艺术家与分类详情页顶部同时显示合集总时长，专辑与艺术家详情页支持顶部返回按钮及底部关联卡片封面预览、互跳过渡与一键播放。'),
                               _link(
                                   context,
                                   'guide-basic-music-page',
@@ -451,7 +451,7 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                           _text(
                               '没有可读取的内嵌封面时，会尝试歌曲同目录的 cover、folder、front、album 或 albumart 图片，支持 JPG、JPEG、PNG、WebP、BMP 和 GIF。添加或更换图片后可刷新曲库或重新读取封面；开启自动刷新后会跟随文件变化，不改写音乐文件。'),
                           _text(
-                              '多碟专辑可使用“音轨”排序，先按碟号、再按音轨排列；智能歌单和待播队列的专辑音轨排序也遵循此顺序。旧曲库首次刷新会补读支持格式的碟号标签，未填写的编号排在最后，不从文件名猜测。'),
+                              '多碟专辑可使用“音轨”排序，先按碟号、再按音轨排列，并在专辑详情列表按碟号与碟片副标题分段显示及快速起播；智能歌单和待播队列的专辑音轨排序也遵循此顺序。旧曲库首次刷新会补读支持格式的碟号标签，未填写的编号排在最后，不从文件名猜测。'),
                           _text(
                               '“文件名”排序按本地文件名称排列，数字按自然顺序比较，例如 2 在 10 前；同源 CUE 分轨保留原顺序，网络歌曲与缺失文件名始终排在最后。它不改文件名或原有歌单顺序。'),
                         ]),
@@ -483,6 +483,8 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               '联网注音需要您自己的 Yahoo! JAPAN Client ID；离线词典缺失时可手动安装组件，也可在设置中批量处理已缓存歌词。生成假名按汉字位置显示并存入独立缓存，保留原歌词和已有注音；自动读音仅供参考。'),
                           _text(
                               '支持读取内嵌歌词（含 ID3v2 SYLT 与 Vorbis/APE 同步歌词标签），并优先识别歌词原文中作者手写的行内注音，如 漢字(かな)、漢字（かな）或 漢字《かな》；无须联网或词典也可直接显示。'),
+                          _text(
+                              '阅读工具中“显示日语假名”下方可勾选“显示英语音标”，使用内置离线词典在英语单词上方显示国际音标（IPA），可与日语假名同句并存；设置中可切换纯音标、斜线或方括号样式，也可离线批量生成已缓存歌词的英语音标。内嵌纯文本歌词（USLT／UNSYNCEDLYRICS）在无同步歌词时也会自动识别显示。'),
                           _demo('lyrics', PlayerGuideDemoKind.lyrics),
                           const SizedBox(height: 8),
                           _text(
@@ -492,6 +494,18 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               '已确认或已选用的人工歌词优先；其他歌曲按“首选歌词来源”读取本地与已缓存内容，均缺失后才由自动联网决定是否搜索。手动搜索或选择不受自动开关限制，校准与编辑可从歌词页现有入口进入。'),
                           _link(context, 'guide-lyric-settings', '打开歌词体验设置',
                               () => _setting(context, 'lyrics', 'experience')),
+                          _link(
+                              context,
+                              'guide-lyric-annotations-settings',
+                              '打开歌词注音与音标',
+                              () =>
+                                  _setting(context, 'lyrics', 'annotations')),
+                          _link(
+                              context,
+                              'guide-english-batch-settings',
+                              '打开批量生成英语音标',
+                              () => _setting(
+                                  context, 'lyrics', 'english-batch')),
                         ]),
                         _section(context, 'sources-comments', '歌词来源与评论关联',
                             Icons.forum_outlined, [
@@ -632,6 +646,9 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               '完整便携包解压后已带 FFmpeg 与离线注音组件，请保留随包的 tool 文件夹。安装器仅安装核心播放器；需要转码或离线假名时，可在设置中安装对应组件。更新核心播放器会保留已安装的组件。'),
                           const SizedBox(height: 8),
                           _text(
+                              '英语音标词库体积精简（不足 1 MB），已直接随核心播放器内置，无须额外安装；便携包随附的音频版 FFmpeg 与离线日语假名词典均已经无损减重。'),
+                          const SizedBox(height: 8),
+                          _text(
                               '歌词页“更多”中的本曲设置、响度与峰值分析、音频文件校验用于查看与调整当前歌曲。分析和校验只读取源文件；响度分析给出参考增益，不会自动改写音频。'),
                         ]),
                         _chapter(context, 6,
@@ -652,6 +669,8 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               '主题、桌面歌词、任务栏歌词和性能选项已有各自说明；下面直接定位到对应设置。桌面歌词与任务栏歌词互斥，任务栏空区不足时会隐藏显示。'),
                           _text(
                               '全屏歌词页在键鼠静止数秒后会自动隐藏指针，移动鼠标、滚轮、按键、切出窗口或打开弹窗时会立即恢复。'),
+                          _text(
+                              '全站胶囊按钮、分段切换、搜索栏、弹窗与悬浮播放底栏均实时跟随封面动态取色与浅色／深色对比度。'),
                           _link(context, 'guide-theme-settings', '打开主题设置',
                               () => _setting(context, 'appearance', 'theme')),
                           _link(
@@ -807,6 +826,18 @@ class _PlayerFeatureGuideDialogState extends State<PlayerFeatureGuideDialog> {
                               'guide-library-health-settings',
                               '打开曲库健康与搬迁',
                               () => _setting(context, 'library', 'health')),
+                        ]),
+                        _section(context, 'diagnostics', '问题反馈与运行日志',
+                            Icons.bug_report_outlined, [
+                          _text(
+                              '在“设置 → 更新与关于 → 报告问题”点击“创建问题”打开反馈弹窗，选择问题分类并填写标题与复现说明，可一键复制完整诊断报告或跳转 GitHub 提交。默认开启“隐藏个人路径”，自动将系统用户名与应用资料根目录脱敏。'),
+                          _text(
+                              '每条运行日志均记录本地毫秒级时间戳，支持按“近 15 天”“本次启动”与“警告与错误”筛选；按日保存的日志文件在满 15 天后自动删除，且不会混入个人资料备份包。'),
+                          _link(
+                              context,
+                              'guide-issue-settings',
+                              '打开报告问题设置',
+                              () => _setting(context, 'about', 'issues')),
                         ]),
                         _chapter(context, 8,
                             '用搜索缩小范围，再借助快捷键提高操作效率；完整语法和实际保存的快捷键可直接打开查看。'),

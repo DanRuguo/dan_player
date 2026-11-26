@@ -191,33 +191,60 @@ class _PlaybackBookmarksDialogState extends State<PlaybackBookmarksDialog> {
                             ? '保存喜欢的位置或 A-B 片段，下次打开这首歌仍可使用。'
                             : '回到这首本地歌曲后，即可跳转或保存书签。')),
                         const SizedBox(height: 16),
-                        Wrap(spacing: 8, runSpacing: 8, children: [
-                          ChoiceChip(
-                              label: Text(ui('时间点')),
-                              selected: !_selectRange,
-                              labelStyle: TextStyle(color: scheme.primary),
-                              checkmarkColor: scheme.primary,
-                              onSelected: canSave
-                                  ? (_) => setState(() => _selectRange = false)
-                                  : null),
-                          ChoiceChip(
-                              label: Text(ui('时间段')),
-                              selected: _selectRange,
-                              labelStyle: TextStyle(color: scheme.primary),
-                              checkmarkColor: scheme.primary,
-                              onSelected: canSave
-                                  ? (_) => setState(() => _selectRange = true)
-                                  : null),
-                        ]),
-                        const SizedBox(height: 8),
-                        Text(
-                            _selectRange
-                                ? '${_time(_range.start)} — ${_time(_range.end)}'
-                                : _time(_point),
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
-                                ?.copyWith(color: scheme.primary)),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 8,
+                          alignment: WrapAlignment.spaceBetween,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Wrap(spacing: 8, runSpacing: 8, children: [
+                              ChoiceChip(
+                                  label: Text(ui('时间点')),
+                                  selected: !_selectRange,
+                                  labelStyle: TextStyle(color: scheme.primary),
+                                  checkmarkColor: scheme.primary,
+                                  onSelected: canSave
+                                      ? (_) =>
+                                          setState(() => _selectRange = false)
+                                      : null),
+                              ChoiceChip(
+                                  label: Text(ui('时间段')),
+                                  selected: _selectRange,
+                                  labelStyle: TextStyle(color: scheme.primary),
+                                  checkmarkColor: scheme.primary,
+                                  onSelected: canSave
+                                      ? (_) =>
+                                          setState(() => _selectRange = true)
+                                      : null),
+                            ]),
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: scheme.primaryContainer
+                                    .withValues(alpha: .55),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 6),
+                                child: Text(
+                                    _selectRange
+                                        ? '${_time(_range.start)} — ${_time(_range.end)}'
+                                        : _time(_point),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(
+                                          color: scheme.onPrimaryContainer,
+                                          fontWeight: FontWeight.w700,
+                                          fontFeatures: const [
+                                            FontFeature.tabularFigures()
+                                          ],
+                                        )),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
                         if (service.length.isFinite && service.length > 0)
                           _selectRange
                               ? RangeSlider(

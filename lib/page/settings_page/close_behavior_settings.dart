@@ -84,7 +84,7 @@ class _CloseBehaviorSettingsState extends State<CloseBehaviorSettings> {
       child: AppMenuAnchor(
         crossAxisUnconstrained: false,
         style: MenuStyle(
-          shape: const WidgetStatePropertyAll(AppShape.control),
+          shape: const WidgetStatePropertyAll(AppShape.surface),
           maximumSize: WidgetStatePropertyAll(Size(width, double.infinity)),
         ),
         menuChildren: [

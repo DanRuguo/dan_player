@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:dan_player/component/app_content_transition.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/component/now_playing_bar_metrics.dart';
@@ -28,18 +26,6 @@ class _PersonalLibraryPanelState extends State<PersonalLibraryPanel> {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final labels = [ui('评分和标签'), ui('全库书签')];
-    final painter = TextPainter(
-        textDirection: Directionality.of(context),
-        textScaler: MediaQuery.textScalerOf(context),
-        maxLines: 1);
-    var segmentWidth = 44.0;
-    for (final label in labels) {
-      painter.text =
-          TextSpan(text: label, style: Theme.of(context).textTheme.labelLarge);
-      painter.layout();
-      segmentWidth = math.max(segmentWidth, painter.width.ceilToDouble() + 56);
-    }
-    painter.dispose();
     final tabs = AppSegmentedControl<bool>(
       value: _bookmarks,
       options: [
@@ -56,10 +42,10 @@ class _PersonalLibraryPanelState extends State<PersonalLibraryPanel> {
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         LayoutBuilder(
             builder: (context, constraints) => Align(
-                alignment: Alignment.centerLeft,
-                child: SizedBox(
+                alignment: AlignmentDirectional.centerStart,
+                child: ConstrainedBox(
                     key: const ValueKey('personal-library-tabs'),
-                    width: math.min(constraints.maxWidth, segmentWidth * 2 + 4),
+                    constraints: BoxConstraints(maxWidth: constraints.maxWidth),
                     child: tabs))),
         const SizedBox(height: 12),
         Expanded(

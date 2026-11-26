@@ -31,16 +31,18 @@ and 26,425 conflicting forms are omitted. No translations are bundled.
 KANJIDIC2 supplies Japanese on/kun stems for 12,356 characters; meanings,
 Chinese readings, names, stroke/order and dictionary-reference codes are omitted.
 
-The original IPADIC resource and its checksum remain unchanged. The supplemental
-data stays in two separate compressed files beside IPADIC inside the optional
-reading component. Known contextual readings use only the small
+The supplemental data stays in two separate compressed files beside IPADIC inside
+the optional reading component. Known contextual readings use only the small
 character resource for conservative, uniquely matching mono-ruby alignment.
-The larger lexical map loads on the first unknown-Han fallback. No application
-network request is introduced by either resource.
+The larger lexical table (`supplemental-reading-v2.bin.gz`, `DANJPSUP` columnar
+32-word front-coded blocks) loads only on the first unknown-Han fallback and is
+searched directly in ~5.5 MB contiguous memory without constructing a large hash
+table. Legacy `supplemental-reading-v1.json.gz` (`f4bf033f...`) remains accepted
+for previously installed slim-installer copies.
 
 | Derived resource | Compressed bytes | SHA-256 |
 | --- | ---: | --- |
-| `rust/assets/supplemental-reading-v1.json.gz` | 3618558 | f4bf033fb622280875be6199d20d44fe2307310ea41b403a37f30c6b3a23a772 |
+| `rust/assets/supplemental-reading-v2.bin.gz` | 1839924 | 474cc3a94a8c270bf1512c32849ee85df2ef83cda130f1b9b331aa9b0134b74d |
 | `rust/assets/kanji-reading-v1.json.gz` | 106686 | 18c12298210019c8b620287b0c995ca30d8fad73542ef46d395736f4e29e49d3 |
 
 These resources are modified extracts of the EDRDG data. They remain CC BY-SA

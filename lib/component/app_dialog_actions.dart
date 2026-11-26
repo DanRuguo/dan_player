@@ -5,7 +5,7 @@ class AppDialogActions extends StatelessWidget {
   const AppDialogActions({
     super.key,
     required this.children,
-    this.spacing = 8,
+    this.spacing = 10,
     this.runSpacing = 8,
   });
 

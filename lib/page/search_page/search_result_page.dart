@@ -296,19 +296,33 @@ class _SearchResultBody extends StatelessWidget {
   final VoidCallback retryOnline;
 
   SliverToBoxAdapter _header(BuildContext context, String title) {
+    final scheme = Theme.of(context).colorScheme;
     return SliverToBoxAdapter(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(8.0, 16.0, 8.0, 8.0),
+        padding: const EdgeInsets.fromLTRB(8.0, 18.0, 8.0, 8.0),
         child: AppEntrance(
           identity: ('search-section', title),
           order: 2,
-          child: Text(
-            title,
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurface,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
+          child: Row(
+            children: [
+              Container(
+                width: 4,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: scheme.primary,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: TextStyle(
+                  color: scheme.onSurface,
+                  fontSize: 19,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
           ),
         ),
       ),

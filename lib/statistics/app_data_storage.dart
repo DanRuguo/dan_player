@@ -53,6 +53,7 @@ class AppDataStorageScanner {
       return categories[6];
     }
     if (value.startsWith('updates/') ||
+        value.startsWith('logs/') ||
         value.endsWith('.tmp') ||
         value.endsWith('.partial') ||
         value.endsWith('.pending')) {

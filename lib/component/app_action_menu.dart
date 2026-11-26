@@ -154,7 +154,10 @@ class _AppActionMenuState<T> extends State<AppActionMenu<T>> {
               }
             : null,
         style: ButtonStyle(
-          minimumSize: const WidgetStatePropertyAll(Size(0, 48)),
+          minimumSize: const WidgetStatePropertyAll(Size(0, 44)),
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
           padding: WidgetStatePropertyAll(item.padding),
           textStyle: WidgetStateProperty.resolveWith((states) =>
               popupTheme.labelTextStyle?.resolve(states) ??
@@ -173,14 +176,14 @@ class _AppActionMenuState<T> extends State<AppActionMenu<T>> {
       alignmentOffset: widget.alignmentOffset,
       style: MenuStyle(
         alignment: widget.alignment,
-        shape: const WidgetStatePropertyAll(AppShape.control),
-        backgroundColor: WidgetStatePropertyAll(scheme.surfaceContainer),
+        shape: const WidgetStatePropertyAll(AppShape.surface),
+        backgroundColor: WidgetStatePropertyAll(scheme.surfaceContainerLow),
         surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
         shadowColor:
-            WidgetStatePropertyAll(scheme.shadow.withValues(alpha: .18)),
-        elevation: const WidgetStatePropertyAll(4),
+            WidgetStatePropertyAll(scheme.shadow.withValues(alpha: .22)),
+        elevation: const WidgetStatePropertyAll(6),
         padding:
-            const WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 6)),
+            const WidgetStatePropertyAll(EdgeInsets.all(6)),
         minimumSize: WidgetStatePropertyAll(Size(width, 0)),
         maximumSize: WidgetStatePropertyAll(Size(width, height)),
       ),

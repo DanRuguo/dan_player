@@ -1,6 +1,9 @@
 import 'dart:io';
 
+import 'package:dan_player/component/app_dialog_actions.dart';
+import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_presentation.dart';
+import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/settings_tile.dart';
 import 'package:dan_player/utils.dart';
 import 'package:dan_player/windows_shell.dart';
@@ -38,16 +41,26 @@ class _UninstallSettingsState extends State<UninstallSettings> {
       dialogBottomInset: 24,
       builder: (context) => AlertDialog(
         insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
-        icon: const Icon(Symbols.delete_outline),
-        title: Text(ui('卸载 Dan Player')),
-        content: Text(ui('播放器将保存状态并退出，然后打开本次安装的卸载向导。您的音乐文件、歌单和设置会保留。')),
+        title: AppDialogTitle(
+          ui('卸载 Dan Player'),
+          leading: const Icon(Symbols.delete_outline),
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: Text(ui('播放器将保存状态并退出，然后打开本次安装的卸载向导。您的音乐文件、歌单和设置会保留。')),
+        ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(ui('取消'))),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(ui('退出并打开卸载向导'))),
+          AppDialogActions(
+            children: [
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: Text(ui('取消'))),
+              FilledButton.icon(
+                  onPressed: () => Navigator.pop(context, true),
+                  icon: const Icon(Symbols.exit_to_app, size: 18),
+                  label: Text(ui('退出并打开卸载向导'))),
+            ],
+          ),
         ],
       ),
     );
@@ -69,6 +82,7 @@ class _UninstallSettingsState extends State<UninstallSettings> {
   Widget build(BuildContext context) {
     if (!Platform.isWindows) return const SizedBox.shrink();
     UiLanguageScope.watch(context);
+    final scheme = Theme.of(context).colorScheme;
     return FutureBuilder<WindowsInstallation>(
       future: _installation,
       builder: (context, snapshot) {
@@ -89,8 +103,25 @@ class _UninstallSettingsState extends State<UninstallSettings> {
                 title: ui('应用管理'), icon: Symbols.apps, subtitle: subtitle),
             if (installation != null) ...[
               const SizedBox(height: 12),
-              SelectableText(installation.directory,
-                  style: Theme.of(context).textTheme.bodySmall),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest.withValues(alpha: .46),
+                  borderRadius: AppShape.controlRadius,
+                  border: Border.all(
+                      color: scheme.outlineVariant.withValues(alpha: .42)),
+                ),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: SelectableText(
+                    installation.directory,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontFamily: 'Consolas',
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                ),
+              ),
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 key: const ValueKey('uninstall-or-open-folder'),

@@ -12,6 +12,29 @@ abstract interface class LyricRubySpan {
   String get text;
 }
 
+/// Display-only phonetic (IPA) spans use uniform bundled IPA font shaping
+/// (`DanPretendard`) and single-line horizontal fitting without changing
+/// Japanese ruby shaping.
+abstract interface class LyricPhoneticSpan implements LyricRubySpan {}
+
+bool isLyricPhoneticSpan(LyricRubySpan span) => span is LyricPhoneticSpan;
+
+/// Merge active Japanese reading spans and English phonetic spans in ascending
+/// UTF-16 offset order without allocating when only one layer is active.
+List<LyricRubySpan> mergeLyricRubySpans(
+  List<LyricRubySpan> japaneseSpans,
+  List<LyricRubySpan> englishSpans,
+) {
+  if (englishSpans.isEmpty) return japaneseSpans;
+  if (japaneseSpans.isEmpty) return englishSpans;
+  final merged = <LyricRubySpan>[...japaneseSpans, ...englishSpans]
+    ..sort((a, b) {
+      final byStart = a.start.compareTo(b.start);
+      return byStart != 0 ? byStart : a.end.compareTo(b.end);
+    });
+  return List<LyricRubySpan>.unmodifiable(merged);
+}
+
 /// Keep an indivisible contextual ruby word on one visual row when it fits the
 /// viewport. Mono-ruby spans need no change; irregular readings such as 今日
 /// remain intact instead of assigning arbitrary syllables to their characters.
@@ -99,7 +122,14 @@ class LyricRubyShaping {
   }) : _shapes = [
           for (final span in spans)
             _RubyShape(
-                span.text, style, policy, direction, scaler, locale, vertical)
+                span.text,
+                style,
+                policy,
+                direction,
+                scaler,
+                locale,
+                vertical,
+                phonetic: isLyricPhoneticSpan(span))
         ];
 
   final List<_RubyShape> _shapes;
@@ -113,8 +143,9 @@ class LyricRubyShaping {
 
 class _RubyShape {
   _RubyShape(String text, this.style, this.policy, this.direction, this.scaler,
-      this.locale, this.vertical)
-      : text = vertical ? text.characters.join('\n') : text {
+      this.locale, this.vertical,
+      {this.phonetic = false})
+      : text = (vertical && !phonetic) ? text.characters.join('\n') : text {
     natural = _shape((style.fontSize ?? 14) * .45);
   }
   final String text;
@@ -124,35 +155,46 @@ class _RubyShape {
   final TextScaler scaler;
   final Locale? locale;
   final bool vertical;
+  final bool phonetic;
   late final TextPainter natural;
   TextPainter? _fitted;
   double? _fitSize;
   double? _fitWidth;
   final _rasters = <TextPainter, Map<double, _RubyRaster>>{};
 
-  TextPainter _shape(double size) => TextPainter(
-        text: appFontSpan(text,
-            style: style.copyWith(
-                fontSize: size,
-                color: Colors.white,
-                height: 1,
-                letterSpacing: 0,
-                shadows: const []),
-            policy: policy),
-        textDirection: direction,
-        textScaler: scaler,
-        locale: locale,
-      )..layout();
+  TextPainter _shape(double size) {
+    final baseStyle = style.copyWith(
+        fontSize: size,
+        color: Colors.white,
+        height: 1,
+        letterSpacing: 0,
+        shadows: const []);
+    final span = phonetic && policy.uiFace.id != 'inherit'
+        ? TextSpan(
+            text: text,
+            style: baseStyle.copyWith(
+                fontFamily: appBundledFonts[3].family,
+                fontFamilyFallback: policy.fallback))
+        : appFontSpan(text, style: baseStyle, policy: policy);
+    return TextPainter(
+      text: span,
+      textDirection: direction,
+      textScaler: scaler,
+      locale: locale,
+    )..layout();
+  }
 
   TextPainter fit(double available) {
     final originalSize = (style.fontSize ?? 14) * .45;
-    final originalExtent = vertical ? natural.height : natural.width;
+    final originalExtent =
+        (vertical && !phonetic) ? natural.height : natural.width;
     if (available <= 0 || originalExtent <= available) return natural;
-    final size =
-        math.max(originalSize / 2, originalSize * available / originalExtent);
-    // At the readable lower bound, a long horizontal pronunciation wraps
-    // inside its own Han fragment. Retain at most one fitted shape per span.
-    final fitWidth = !vertical && size == originalSize / 2
+    final minScale = phonetic ? .58 : .5;
+    final size = math.max(
+        originalSize * minScale, originalSize * available / originalExtent);
+    // At the readable lower bound, a long horizontal Japanese pronunciation
+    // wraps inside its own Han fragment. Phonetic IPA words stay single-line.
+    final fitWidth = !vertical && !phonetic && size == originalSize * minScale
         ? math.max(1.0, available)
         : double.infinity;
     if (_fitted == null || _fitSize != size || _fitWidth != fitWidth) {
@@ -345,6 +387,7 @@ class LyricRubyLayout {
       _lines = metrics;
       _rowRanges = _paragraphRows(primary!, metrics.length);
     }
+    final lastPhoneticRightByRow = <int, double>{};
     for (final (index, span) in spans.indexed) {
       if (span.start < 0 ||
           span.end <= span.start ||
@@ -352,6 +395,7 @@ class LyricRubyLayout {
           (sourceLength != null && span.end > sourceLength)) {
         continue;
       }
+      final phonetic = isLyricPhoneticSpan(span);
       Rect? source;
       var row = 0;
       var sourceEnd = span.end;
@@ -380,8 +424,15 @@ class LyricRubyLayout {
       }
       if (source == null || source.isEmpty) continue;
       final sourceBounds = source;
-      final available =
-          vertical ? sourceBounds.height : math.min(width, sourceBounds.width);
+      final available = vertical
+          ? (phonetic
+              ? math.max(fontSize * 1.4, sourceBounds.width)
+              : sourceBounds.height)
+          : math.min(
+              width,
+              phonetic
+                  ? math.max(sourceBounds.width, fontSize * .95)
+                  : sourceBounds.width);
       final painter = _shaping!._shapes[index].fit(available);
       double sourceTop = sourceBounds.top;
       double lineWidth = sourceBounds.width;
@@ -396,13 +447,21 @@ class LyricRubyLayout {
             gap / 2;
         lineWidth = line.width;
       }
+      double horizontalDx = (sourceBounds.center.dx - painter.width / 2)
+          .clamp(0.0, math.max(0.0, width - painter.width))
+          .toDouble();
+      if (!vertical && phonetic) {
+        final previousRight = lastPhoneticRightByRow[row];
+        if (previousRight != null && horizontalDx < previousRight + gap) {
+          horizontalDx = math.min(
+              previousRight + gap, math.max(0.0, width - painter.width));
+        }
+        lastPhoneticRightByRow[row] = horizontalDx + painter.width;
+      }
       final offset = vertical
           ? Offset(sourceBounds.right + gap,
               sourceBounds.center.dy - painter.height / 2)
-          : Offset(
-              (sourceBounds.center.dx - painter.width / 2)
-                  .clamp(0.0, math.max(0.0, width - painter.width)),
-              sourceTop - painter.height - gap);
+          : Offset(horizontalDx, sourceTop - painter.height - gap);
       // Top padding belongs only to readings above the first native row.
       // Later rows reserve their own leading below, without changing the
       // primary's font metrics or introducing a blank first reading row.
@@ -572,6 +631,7 @@ class LyricRubyLayout {
       void Function(Canvas, LyricRubyGlyph)? transform,
       Color? tint,
       double visibility = 1,
+      double Function(LyricRubySpan)? spanVisibility,
       double? rasterScale}) {
     if (visibility <= 0) return;
     if (glyphs.isEmpty) return;
@@ -583,13 +643,52 @@ class LyricRubyLayout {
                   Offset(0, leadingForGlyph(glyph) * visibility) +
                   displacement(glyph)
           ];
-    final color = (tint ?? this.color)
-        .withValues(alpha: (tint ?? this.color).a * visibility);
+    final baseTint = tint ?? this.color;
+    List<double>? perGlyphAlpha;
+    var uniformVisibility = visibility;
+    if (spanVisibility != null) {
+      final first = spanVisibility(glyphs.first.span).clamp(0.0, 1.0);
+      var uniform = true;
+      final values = <double>[first];
+      for (var index = 1; index < glyphs.length; index++) {
+        final next = spanVisibility(glyphs[index].span).clamp(0.0, 1.0);
+        values.add(next);
+        if ((next - first).abs() > 1e-4) uniform = false;
+      }
+      if (uniform) {
+        if (first <= 0) return;
+        uniformVisibility = first;
+      } else {
+        if (values.every((value) => value <= 0)) return;
+        perGlyphAlpha = values;
+      }
+    }
+    final color =
+        baseTint.withValues(alpha: baseTint.a * uniformVisibility);
     if (rasterScale != null &&
         rasterScale.isFinite &&
         rasterScale > 0 &&
-        _paintRasters(
-            canvas, rasterScale, color, offsets, transform, visibility)) {
+        _paintRasters(canvas, rasterScale, baseTint, color, offsets, transform,
+            visibility, perGlyphAlpha)) {
+      return;
+    }
+    if (perGlyphAlpha != null) {
+      for (final (index, glyph) in glyphs.indexed) {
+        final alpha = perGlyphAlpha[index];
+        if (alpha <= 0) continue;
+        final glyphOffset = offsets?[index] ??
+            glyph.offset + Offset(0, leadingForGlyph(glyph) * visibility);
+        final glyphColor = baseTint.withValues(alpha: baseTint.a * alpha);
+        canvas.save();
+        transform?.call(canvas, glyph);
+        canvas.saveLayer(
+            (glyphOffset & glyph.painter.size).inflate(extent * 2 + 24),
+            Paint()
+              ..colorFilter = ColorFilter.mode(glyphColor, BlendMode.srcIn));
+        glyph.painter.paint(canvas, glyphOffset);
+        canvas.restore();
+        canvas.restore();
+      }
       return;
     }
     var coverage = paintBounds;
@@ -618,10 +717,12 @@ class LyricRubyLayout {
   bool _paintRasters(
       Canvas canvas,
       double ratio,
+      Color baseTint,
       Color color,
       List<Offset>? offsets,
       void Function(Canvas, LyricRubyGlyph)? transform,
-      double visibility) {
+      double visibility,
+      List<double>? perGlyphAlpha) {
     if (glyphs.length > _RubyRaster.maximumEntries) return false;
     final snapshots = <({drawing.Image image, Rect bounds})>[];
     var pixels = 0;
@@ -639,9 +740,18 @@ class LyricRubyLayout {
         ..filterQuality = FilterQuality.low
         ..colorFilter = ColorFilter.mode(color, BlendMode.srcIn);
       for (final (index, glyph) in glyphs.indexed) {
+        final glyphAlpha = perGlyphAlpha?[index];
+        if (glyphAlpha != null && glyphAlpha <= 0) continue;
         final snapshot = snapshots[index];
         final offset = offsets?[index] ??
             glyph.offset + Offset(0, leadingForGlyph(glyph) * visibility);
+        final glyphPaint = glyphAlpha == null
+            ? paint
+            : (Paint()
+              ..filterQuality = FilterQuality.low
+              ..colorFilter = ColorFilter.mode(
+                  baseTint.withValues(alpha: baseTint.a * glyphAlpha),
+                  BlendMode.srcIn));
         canvas.save();
         try {
           transform?.call(canvas, glyph);
@@ -650,7 +760,7 @@ class LyricRubyLayout {
               Rect.fromLTWH(0, 0, snapshot.image.width.toDouble(),
                   snapshot.image.height.toDouble()),
               snapshot.bounds.shift(offset),
-              paint);
+              glyphPaint);
         } finally {
           canvas.restore();
         }

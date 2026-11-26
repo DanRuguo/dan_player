@@ -505,10 +505,19 @@ class _CategoryDetailPageState extends State<CategoryDetailPage> {
                       key: const ValueKey('category-track-search'),
                       controller: _search,
                       onChanged: (value) => setState(() => _query = value),
-                      decoration: InputDecoration(
+                      decoration: AppShape.searchDecoration(
+                        context,
                         hintText: ui("在此分类中搜索歌曲"),
-                        prefixIcon: const Icon(Icons.search),
-                        border: AppShape.inputBorder,
+                        suffixIcon: _query.isEmpty
+                            ? null
+                            : IconButton(
+                                tooltip: ui("清除搜索"),
+                                onPressed: () => setState(() {
+                                  _query = '';
+                                  _search.clear();
+                                }),
+                                icon: const Icon(Icons.close_rounded, size: 19),
+                              ),
                       ),
                     ),
                   );

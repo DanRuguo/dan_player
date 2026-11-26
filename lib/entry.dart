@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'package:dan_player/startup_progress.dart';
 import 'package:desktop_lyric/font_policy.dart';
 import 'package:dan_player/component/app_route_transition.dart';
 import 'package:dan_player/component/multi_selection_lifecycle.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_presentation.dart';
+import 'package:dan_player/component/app_touch_sound.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/component/app_fonts.dart';
 import 'package:dan_player/component/app_control_theme.dart';
@@ -27,12 +29,12 @@ import 'package:dan_player/page/audios_page.dart';
 import 'package:dan_player/page/collection_detail_page.dart';
 import 'package:dan_player/page/collections_page.dart';
 import 'package:dan_player/page/folders_page.dart';
+import 'package:dan_player/page/now_playing_page/component/lyric_viewport_blur.dart';
 import 'package:dan_player/page/now_playing_page/page.dart';
 import 'package:dan_player/page/playlist_detail_page.dart';
 import 'package:dan_player/page/playlists_page.dart';
 import 'package:dan_player/page/search_page/search_page.dart';
 import 'package:dan_player/page/search_page/search_result_page.dart';
-import 'package:dan_player/page/settings_page/create_issue.dart';
 import 'package:dan_player/page/settings_page/page.dart';
 import 'package:dan_player/page/statistics_page.dart';
 import 'package:dan_player/page/updating_page.dart';
@@ -80,7 +82,11 @@ class SlideTransitionPage<T> extends CustomTransitionPage<T> {
     Animation<double> secondaryAnimation,
     Widget child,
   ) =>
-      AppRouteTransition(animation: animation, child: child);
+      AppRouteTransition(
+        animation: animation,
+        secondaryAnimation: secondaryAnimation,
+        child: child,
+      );
 }
 
 /// The nested pages own their fades and entrances. Keep the shared window
@@ -90,7 +96,9 @@ class AppShellPage<T> extends NoTransitionPage<T> {
 }
 
 class Entry extends StatelessWidget {
-  Entry({super.key, required this.welcome});
+  Entry({super.key, required this.welcome}) {
+    unawaited(LyricViewportBlur.ensureShaderLoaded());
+  }
   final bool welcome;
 
   ThemeData fromSchemeAndFontFamily({
@@ -122,17 +130,17 @@ class Entry extends StatelessWidget {
         style: ButtonStyle(
           overlayColor: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.pressed)) {
-              return colorScheme.primary.withValues(alpha: 0.12);
+              return colorScheme.primary.withValues(alpha: 0.13);
             }
             if (states.contains(WidgetState.hovered)) {
-              return colorScheme.primary.withValues(alpha: 0.06);
+              return colorScheme.primary.withValues(alpha: 0.08);
             }
             if (states.contains(WidgetState.focused)) {
-              return colorScheme.primary.withValues(alpha: 0.08);
+              return colorScheme.primary.withValues(alpha: 0.09);
             }
             return null;
           }),
-          shape: const WidgetStatePropertyAll(AppShape.control),
+          shape: const WidgetStatePropertyAll(AppShape.pill),
         ),
       ),
       // Desktop Flutter's default tooltip is an opaque black rectangle. Use
@@ -141,58 +149,95 @@ class Entry extends StatelessWidget {
       tooltipTheme: TooltipThemeData(
         waitDuration: const Duration(milliseconds: 450),
         showDuration: const Duration(seconds: 3),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
         decoration: BoxDecoration(
           color: colorScheme.surfaceContainerHighest.withValues(alpha: .98),
-          borderRadius: AppShape.smallRadius,
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: colorScheme.outlineVariant.withValues(alpha: .72),
+            color: colorScheme.outlineVariant.withValues(alpha: .56),
           ),
           boxShadow: [
             BoxShadow(
               color: colorScheme.shadow.withValues(alpha: .16),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
       ),
       filledButtonTheme: const FilledButtonThemeData(
-        style: ButtonStyle(shape: WidgetStatePropertyAll(AppShape.control)),
+        style: ButtonStyle(shape: WidgetStatePropertyAll(AppShape.pill)),
       ),
       elevatedButtonTheme: const ElevatedButtonThemeData(
-        style: ButtonStyle(shape: WidgetStatePropertyAll(AppShape.control)),
+        style: ButtonStyle(shape: WidgetStatePropertyAll(AppShape.pill)),
       ),
       outlinedButtonTheme: const OutlinedButtonThemeData(
-        style: ButtonStyle(shape: WidgetStatePropertyAll(AppShape.control)),
+        style: ButtonStyle(shape: WidgetStatePropertyAll(AppShape.pill)),
       ),
       textButtonTheme: const TextButtonThemeData(
-        style: ButtonStyle(shape: WidgetStatePropertyAll(AppShape.control)),
+        style: ButtonStyle(shape: WidgetStatePropertyAll(AppShape.pill)),
       ),
       segmentedButtonTheme: const SegmentedButtonThemeData(
-        style: ButtonStyle(shape: WidgetStatePropertyAll(AppShape.control)),
+        style: ButtonStyle(shape: WidgetStatePropertyAll(AppShape.pill)),
       ),
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
-        shape: AppShape.surface,
+        shape: AppShape.card,
+        elevation: 3,
       ),
       listTileTheme: const ListTileThemeData(shape: AppShape.control),
       popupMenuTheme: PopupMenuThemeData(
-          shape: AppShape.control,
-          elevation: 3,
-          color: colorScheme.surfaceContainerLow),
-      cardTheme: const CardThemeData(shape: AppShape.surface),
+        shape: RoundedRectangleBorder(
+          borderRadius: AppShape.surfaceRadius,
+          side: BorderSide(
+            color: colorScheme.outlineVariant.withValues(alpha: .48),
+          ),
+        ),
+        elevation: 6,
+        shadowColor: colorScheme.shadow.withValues(alpha: .22),
+        surfaceTintColor: Colors.transparent,
+        color: colorScheme.surfaceContainerLow,
+      ),
+      cardTheme: CardThemeData(
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        color: colorScheme.surfaceContainerLow,
+        shape: RoundedRectangleBorder(
+          borderRadius: AppShape.cardRadius,
+          side: BorderSide(
+            color: colorScheme.outlineVariant.withValues(alpha: isDark ? .34 : .42),
+          ),
+        ),
+      ),
       dialogTheme: DialogThemeData(
-        backgroundColor: colorScheme.surface,
-        shape: AppShape.surface,
+        backgroundColor:
+            isDark ? colorScheme.surfaceContainerLow : colorScheme.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 8,
+        shadowColor: colorScheme.shadow.withValues(alpha: isDark ? .44 : .20),
+        barrierColor: Colors.black.withValues(alpha: isDark ? .56 : .40),
+        shape: RoundedRectangleBorder(
+          borderRadius: AppShape.dialogRadius,
+          side: BorderSide(
+            color:
+                colorScheme.outlineVariant.withValues(alpha: isDark ? .38 : .46),
+          ),
+        ),
       ),
       menuTheme: MenuThemeData(
         style: MenuStyle(
-          elevation: const WidgetStatePropertyAll(3),
+          elevation: const WidgetStatePropertyAll(6),
+          shadowColor: WidgetStatePropertyAll(
+            colorScheme.shadow.withValues(alpha: .22),
+          ),
+          surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
           backgroundColor:
               WidgetStatePropertyAll(colorScheme.surfaceContainerLow),
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          ),
           side: WidgetStatePropertyAll(BorderSide(
-              color: colorScheme.outlineVariant.withValues(alpha: .6))),
-          shape: const WidgetStatePropertyAll(AppShape.control),
+              color: colorScheme.outlineVariant.withValues(alpha: .52))),
+          shape: const WidgetStatePropertyAll(AppShape.surface),
         ),
       ),
     ));
@@ -259,12 +304,15 @@ class Entry extends StatelessWidget {
                                                                 StartupFooter
                                                                     .progress,
                                                             child:
-                                                                AppPresentationHost(
+                                                                AppTouchSoundScope(
                                                               child:
-                                                                  AppWindowModeHost(
-                                                                child: child ??
-                                                                    const SizedBox
-                                                                        .shrink(),
+                                                                  AppPresentationHost(
+                                                                child:
+                                                                    AppWindowModeHost(
+                                                                  child: child ??
+                                                                      const SizedBox
+                                                                          .shrink(),
+                                                                ),
                                                               ),
                                                             ),
                                                           ),
@@ -527,15 +575,21 @@ class Entry extends StatelessWidget {
                     key: state.pageKey,
                     child: SettingsPage(
                         initialSection: state.uri.queryParameters['section'],
-                        initialSetting: state.uri.queryParameters['setting']),
+                        initialSetting: state.uri.queryParameters['setting'],
+                        openIssueDialogOnMount:
+                            state.uri.queryParameters['openIssue'] == '1'),
                   ),
               routes: [
                 GoRoute(
                   path: "issue",
-                  pageBuilder: (context, state) => SlideTransitionPage(
-                    key: state.pageKey,
-                    child: const SettingsIssuePage(),
-                  ),
+                  redirect: (context, state) => Uri(
+                    path: app_paths.SETTINGS_PAGE,
+                    queryParameters: const {
+                      'section': 'about',
+                      'setting': 'issues',
+                      'openIssue': '1',
+                    },
+                  ).toString(),
                 )
               ]),
         ],

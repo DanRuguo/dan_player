@@ -19,6 +19,7 @@ add_executable(${BINARY_NAME} WIN32
   "installer_launcher.cpp"
   "japanese_phonetic_controller.cpp"
   "japanese_phonetic_worker.cpp"
+  "touch_sound_controller.cpp"
   "main.cpp"
   "utils.cpp"
   "window_backdrop.cpp"

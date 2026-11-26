@@ -18,58 +18,82 @@ class LibraryHealthSettings extends StatelessWidget {
   const LibraryHealthSettings({super.key});
   @override
   Widget build(BuildContext context) => SettingsSurface(
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        SettingsHeader(
-            title: ui('曲库健康与搬迁'),
-            icon: Icons.library_add_check_outlined,
-            subtitle: ui('查看来源状态，或重新关联已经搬好的音乐目录。')),
-        const SizedBox(height: 12),
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          OutlinedButton.icon(
-              icon: const Icon(Icons.fact_check_outlined),
-              label: Text(ui('检查曲库')),
-              onPressed: () => showAppDialog(
-                  context: context, builder: (_) => const _HealthDialog())),
-          OutlinedButton.icon(
-              icon: const Icon(Icons.drive_file_move_outline),
-              label: Text(ui('重定位目录')),
-              onPressed: () => showAppDialog(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (_) => const _RelocationDialog())),
-          TextButton(
-              onPressed: () async {
-                final confirmed = await showAppDialog<bool>(
-                    context: context,
-                    builder: (dialog) => AlertDialog(
-                            title: Text(ui('恢复迁移前的资料？')),
-                            content: Text(ui(
-                                '这会成组恢复最近一次目录迁移前的索引、歌单、统计和歌词等资料，撤销迁移后的相关更改。迁移后新增的资料文件会移入该批次的 displaced 目录保留。音乐文件不会移动。保存恢复任务后将退出，下次启动生效。')),
-                            actions: [
-                              TextButton(
-                                  onPressed: () => Navigator.pop(dialog, false),
-                                  child: Text(ui('取消'))),
-                              FilledButton(
-                                  onPressed: () => Navigator.pop(dialog, true),
-                                  child: Text(ui('恢复并退出')))
-                            ]));
-                if (confirmed != true || !context.mounted) return;
-                try {
-                  final migration = LibraryDataMigration(await getAppDataDir());
-                  await LibraryMutationGate.shared
-                      .run(migration.scheduleRestore);
-                  await shutdownAndExit(throwOnError: true);
-                } catch (error) {
-                  if (context.mounted) {
-                    showAppNotice('$error',
-                        context: context, kind: AppNoticeKind.error);
-                  }
-                }
-              },
-              child: Text(ui('恢复迁移快照'))),
-        ]),
-      ]));
+        child: LayoutBuilder(builder: (context, constraints) {
+          final header = SettingsHeader(
+              title: ui('曲库健康与搬迁'),
+              icon: Icons.library_add_check_outlined,
+              subtitle: ui('查看来源状态，或重新关联已经搬好的音乐目录。'));
+          final actions = Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.end,
+              children: [
+                OutlinedButton.icon(
+                    icon: const Icon(Icons.fact_check_outlined),
+                    label: Text(ui('检查曲库')),
+                    onPressed: () => showAppDialog(
+                        context: context,
+                        builder: (_) => const _HealthDialog())),
+                OutlinedButton.icon(
+                    icon: const Icon(Icons.drive_file_move_outline),
+                    label: Text(ui('重定位目录')),
+                    onPressed: () => showAppDialog(
+                        context: context,
+                        barrierDismissible: false,
+                        builder: (_) => const _RelocationDialog())),
+                TextButton(
+                    onPressed: () async {
+                      final confirmed = await showAppDialog<bool>(
+                          context: context,
+                          builder: (dialog) => AlertDialog(
+                                  title: Text(ui('恢复迁移前的资料？')),
+                                  content: Text(ui(
+                                      '这会成组恢复最近一次目录迁移前的索引、歌单、统计和歌词等资料，撤销迁移后的相关更改。迁移后新增的资料文件会移入该批次的 displaced 目录保留。音乐文件不会移动。保存恢复任务后将退出，下次启动生效。')),
+                                  actions: [
+                                    TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dialog, false),
+                                        child: Text(ui('取消'))),
+                                    FilledButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dialog, true),
+                                        child: Text(ui('恢复并退出')))
+                                  ]));
+                      if (confirmed != true || !context.mounted) return;
+                      try {
+                        final migration =
+                            LibraryDataMigration(await getAppDataDir());
+                        await LibraryMutationGate.shared
+                            .run(migration.scheduleRestore);
+                        await shutdownAndExit(throwOnError: true);
+                      } catch (error) {
+                        if (context.mounted) {
+                          showAppNotice('$error',
+                              context: context, kind: AppNoticeKind.error);
+                        }
+                      }
+                    },
+                    child: Text(ui('恢复迁移快照'))),
+              ]);
+          final scale = MediaQuery.textScalerOf(context).scale(1);
+          if (constraints.maxWidth >= 620 * scale) {
+            return Row(
+              children: [
+                Expanded(child: header),
+                const SizedBox(width: 16),
+                actions,
+              ],
+            );
+          }
+          return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                header,
+                const SizedBox(height: 12),
+                actions,
+              ]);
+        }),
+      );
 }
 
 class _HealthDialog extends StatefulWidget {
@@ -227,7 +251,7 @@ class _RelocationDialogState extends State<_RelocationDialog> {
                       onChanged: (_) => setState(() => _preview = null),
                       decoration: InputDecoration(
                           labelText: ui('旧目录（可填写离线路径）'),
-                          border: const OutlineInputBorder())),
+                          prefixIcon: const Icon(Icons.history_edu_outlined))),
                   const SizedBox(height: 12),
                   TextField(
                       controller: _new,
@@ -235,7 +259,7 @@ class _RelocationDialogState extends State<_RelocationDialog> {
                       onChanged: (_) => setState(() => _preview = null),
                       decoration: InputDecoration(
                           labelText: ui('新目录'),
-                          border: const OutlineInputBorder(),
+                          prefixIcon: const Icon(Icons.drive_file_move_outlined),
                           suffixIcon: IconButton(
                               tooltip: ui('选择文件夹'),
                               icon: const Icon(Icons.folder_open),

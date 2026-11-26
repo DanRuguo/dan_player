@@ -244,8 +244,8 @@ class _FolderTreePaneState extends State<FolderTreePane>
                           direction: Directionality.of(context),
                           color: Theme.of(context)
                               .colorScheme
-                              .outlineVariant
-                              .withValues(alpha: .65)),
+                              .primary
+                              .withValues(alpha: .26)),
                       child: child);
                   if (row.group case final group?) {
                     return guided(Padding(
@@ -253,7 +253,7 @@ class _FolderTreePaneState extends State<FolderTreePane>
                             start: (node.depth + 1) * step +
                                 folderTreeContentInset,
                             end: 8,
-                            top: 2,
+                            top: 4,
                             bottom: 6),
                         child: Semantics(
                             header: true,
@@ -268,9 +268,10 @@ class _FolderTreePaneState extends State<FolderTreePane>
                                     .textTheme
                                     .labelMedium
                                     ?.copyWith(
+                                        fontWeight: FontWeight.w600,
                                         color: Theme.of(context)
                                             .colorScheme
-                                            .onSurfaceVariant)))));
+                                            .primary)))));
                   }
                   if (row.loading) {
                     return guided(Padding(

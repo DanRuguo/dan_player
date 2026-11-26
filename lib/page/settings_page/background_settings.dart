@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/background_image_store.dart';
 import 'package:dan_player/background_preferences.dart';
+import 'package:dan_player/component/app_segmented_control.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/primary_pointer_input.dart';
 import 'package:dan_player/component/settings_section_visibility.dart';
@@ -206,43 +207,51 @@ class _BackgroundSettingsPanelState extends State<BackgroundSettingsPanel> {
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 SettingsHeader(
                     title: ui("背景与毛玻璃"),
                     icon: Icons.wallpaper_outlined,
                     subtitle: ui("三个界面独立设置。主窗口的标题栏、侧栏和边缘共用背景；主内容面板保持清晰。")),
                 const SizedBox(height: 12),
-                Wrap(spacing: 8, runSpacing: 8, children: [
-                  for (final scene in BackgroundScene.values)
-                    ChoiceChip(
-                      key: ValueKey('background-scene-${scene.name}'),
-                      label: Text(ui(scene.label)),
-                      selected: _scene == scene,
-                      onSelected: (_) => setState(() => _scene = scene),
-                    ),
-                ]),
-                const SizedBox(height: 12),
-                Wrap(spacing: 8, runSpacing: 8, children: [
-                  for (final source in BackgroundSource.values)
-                    ChoiceChip(
-                      key: ValueKey('background-source-${source.name}'),
-                      showCheckmark: false,
-                      avatar: Icon(
-                          switch (source) {
-                            BackgroundSource.solid => Icons.blur_off_rounded,
-                            BackgroundSource.desktop =>
-                              Icons.desktop_windows_outlined,
-                            BackgroundSource.artwork => Icons.album_outlined,
-                            BackgroundSource.customImage =>
-                              Icons.image_outlined,
-                          },
-                          size: 20),
-                      label: Text(ui(source.label)),
-                      selected: value.source == source,
-                      onSelected: (_) => _selectSource(source),
-                    ),
-                ]),
+                AppSegmentedControl<BackgroundScene>(
+                  value: _scene,
+                  onChanged: (scene) => setState(() => _scene = scene),
+                  options: [
+                    for (final scene in BackgroundScene.values)
+                      AppSegmentOption(
+                        key: ValueKey('background-scene-${scene.name}'),
+                        value: scene,
+                        label: ui(scene.label),
+                        icon: switch (scene) {
+                          BackgroundScene.main => Icons.web_asset_rounded,
+                          BackgroundScene.nowPlaying => Icons.lyrics_outlined,
+                          BackgroundScene.mini =>
+                            Icons.picture_in_picture_alt_outlined,
+                        },
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                AppSegmentedControl<BackgroundSource>(
+                  value: value.source,
+                  onChanged: _selectSource,
+                  options: [
+                    for (final source in BackgroundSource.values)
+                      AppSegmentOption(
+                        key: ValueKey('background-source-${source.name}'),
+                        value: source,
+                        label: ui(source.label),
+                        icon: switch (source) {
+                          BackgroundSource.solid => Icons.blur_off_rounded,
+                          BackgroundSource.desktop =>
+                            Icons.desktop_windows_outlined,
+                          BackgroundSource.artwork => Icons.album_outlined,
+                          BackgroundSource.customImage => Icons.image_outlined,
+                        },
+                      ),
+                  ],
+                ),
                 const SizedBox(height: 12),
                 Text(switch (value.source) {
                   BackgroundSource.solid =>

@@ -834,6 +834,13 @@ class JapaneseReadingProjector {
         ? (PlainLyric(source.text)
           ..lines.single.romanization = source.lines.single.romanization)
         : LyricSnapshot.capture(source).toLyric();
+    final sharedCount = source.lines.length < copy.lines.length
+        ? source.lines.length
+        : copy.lines.length;
+    for (var i = 0; i < sharedCount; i++) {
+      copy.lines[i].englishPhonetic = source.lines[i].englishPhonetic;
+      copy.lines[i].englishPhoneticSpans = source.lines[i].englishPhoneticSpans;
+    }
     for (final entry in generated.entries) {
       final line = copy.lines[entry.key];
       final primary = lyricPrimaryText(line);

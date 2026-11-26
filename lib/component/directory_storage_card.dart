@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:dan_player/component/app_data_storage_card.dart';
+import 'package:dan_player/component/statistics_card_header.dart';
 import 'package:dan_player/statistics/app_data_storage.dart';
 import 'package:dan_player/statistics/player_directory_storage.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -30,8 +30,6 @@ class DirectoryStorageCard extends StatefulWidget {
 class _DirectoryStorageCardState extends State<DirectoryStorageCard> {
   var _scope = DirectoryStorageScope.cache;
   var _playerRequested = false;
-  // A static pending result covers the frame before the page supplies its
-  // future. Passing null would activate the cache card's standalone scanner.
   final _awaitingPlayer = Completer<AppDataStorageSnapshot>();
 
   void _select(DirectoryStorageScope scope) {
@@ -50,103 +48,47 @@ class _DirectoryStorageCardState extends State<DirectoryStorageCard> {
     UiLanguageScope.watch(context);
     final player = _scope == DirectoryStorageScope.player;
     return AppDataStorageCard(
-        reading: player
-            ? widget.playerReading ?? _awaitingPlayer.future
-            : widget.cacheReading,
-        readingScope: _scope,
-        layoutIndex: _scope.index,
-        layouts: [
-          StorageCardLayout(
-              title: ui('缓存与播放器数据占用'),
-              categories: AppDataStorageScanner.categories,
-              description:
-                  ui('实际文件字节；用户资料、自选图片与可重建缓存分别统计。链接不跟随，仅打开此页或手动刷新时读取。')),
-          StorageCardLayout(
-              title: ui('播放器组件目录占用'),
-              categories: PlayerDirectoryStorageScanner.categories,
-              description:
-                  ui('播放器目录内的实际文件字节；不包含外部音乐、用户数据或外部工具。链接不跟随，首次选择或手动刷新时读取。')),
+      reading: player
+          ? widget.playerReading ?? _awaitingPlayer.future
+          : widget.cacheReading,
+      readingScope: _scope,
+      layoutIndex: _scope.index,
+      layouts: [
+        StorageCardLayout(
+            title: ui('缓存与播放器数据占用'),
+            categories: AppDataStorageScanner.categories,
+            description:
+                ui('实际文件字节；用户资料、自选图片与可重建缓存分别统计。链接不跟随，仅打开此页或手动刷新时读取。')),
+        StorageCardLayout(
+            title: ui('播放器组件目录占用'),
+            categories: PlayerDirectoryStorageScanner.categories,
+            description:
+                ui('播放器目录内的实际文件字节；不包含外部音乐、用户数据或外部工具。链接不跟随，首次选择或手动刷新时读取。')),
+      ],
+      title: player ? ui('播放器组件目录占用') : null,
+      icon: player ? Symbols.folder : Symbols.database,
+      scopeDescription: player
+          ? ui('播放器目录内的实际文件字节；不包含外部音乐、用户数据或外部工具。链接不跟随，首次选择或手动刷新时读取。')
+          : null,
+      headerControls: StatisticsPillSegmented<DirectoryStorageScope>(
+        key: const ValueKey('directory-storage-scope'),
+        value: _scope,
+        options: [
+          (
+            value: DirectoryStorageScope.cache,
+            label: ui('缓存与播放器数据'),
+            icon: Symbols.database,
+            key: const ValueKey('directory-storage-scope-cache'),
+          ),
+          (
+            value: DirectoryStorageScope.player,
+            label: ui('播放器目录'),
+            icon: Symbols.folder,
+            key: const ValueKey('directory-storage-scope-player'),
+          ),
         ],
-        title: player ? ui('播放器组件目录占用') : null,
-        icon: player ? Symbols.folder : Symbols.database,
-        scopeDescription: player
-            ? ui('播放器目录内的实际文件字节；不包含外部音乐、用户数据或外部工具。链接不跟随，首次选择或手动刷新时读取。')
-            : null,
-        headerControls: LayoutBuilder(builder: (context, constraints) {
-          Widget choice(DirectoryStorageScope scope, String text) {
-            final selected = _scope == scope;
-            final chipTheme = ChipTheme.of(context);
-            final style = (chipTheme.labelStyle ??
-                    Theme.of(context).textTheme.labelLarge!)
-                .merge(selected ? chipTheme.secondaryLabelStyle : null);
-            final line = TextPainter(
-                text: TextSpan(text: text, style: style),
-                textDirection: Directionality.of(context),
-                textScaler: MediaQuery.textScalerOf(context),
-                maxLines: 1)
-              ..layout();
-            final markSize = line.height;
-            line.dispose();
-            final label = Builder(builder: (context) {
-              // RawChip supplies a one-line default. Keep its resolved
-              // selected/disabled style while allowing the full label.
-              // A shared maximum wrap budget keeps selection from changing
-              // line count; the unselected native leading slot still is zero.
-              return DefaultTextStyle(
-                  style: DefaultTextStyle.of(context).style,
-                  softWrap: true,
-                  overflow: TextOverflow.visible,
-                  child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                          maxWidth: math.max(
-                              1.0, constraints.maxWidth - markSize - 48)),
-                      child: Text(text)));
-            });
-            return ChoiceChip(
-                key: ValueKey('directory-storage-scope-${scope.name}'),
-                label: label,
-                // Keep the native check at a normal single-line size when the
-                // label wraps. Its slot must use the resolved chip font's
-                // actual line metrics, not the Theme's nominal font height.
-                // Keeping the empty avatar attached also avoids RawChip's
-                // reverse drawer switching to the whole multiline height.
-                // The unselected slot occupies zero space and paints no mark.
-                avatar: const SizedBox.shrink(),
-                avatarBorder: const _EmptyAvatarBorder(),
-                avatarBoxConstraints: BoxConstraints.tightFor(
-                    width: selected ? markSize : 0,
-                    height: selected ? markSize : 0),
-                showCheckmark: true,
-                selected: selected,
-                onSelected: (_) => _select(scope));
-          }
-
-          return Wrap(
-              key: const ValueKey('directory-storage-scope'),
-              spacing: 8,
-              runSpacing: 8,
-              alignment: WrapAlignment.end,
-              children: [
-                choice(DirectoryStorageScope.cache, ui('缓存与播放器数据')),
-                choice(DirectoryStorageScope.player, ui('播放器目录')),
-              ]);
-        }));
+        onChanged: _select,
+      ),
+    );
   }
-}
-
-// A fixed empty avatar constrains RawChip's otherwise multi-line-sized check
-// slot. RawChip also paints an avatar scrim; there is no avatar here to darken.
-// Suppress only that scrim, leaving its native check, colors and animation.
-class _EmptyAvatarBorder extends ShapeBorder {
-  const _EmptyAvatarBorder();
-  @override
-  EdgeInsetsGeometry get dimensions => EdgeInsets.zero;
-  @override
-  ShapeBorder scale(double t) => this;
-  @override
-  Path getInnerPath(Rect rect, {TextDirection? textDirection}) => Path();
-  @override
-  Path getOuterPath(Rect rect, {TextDirection? textDirection}) => Path();
-  @override
-  void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {}
 }

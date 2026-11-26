@@ -1,9 +1,13 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
+import 'dart:ui' as dart_ui;
+
+import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/app_touch_sound.dart';
 import 'package:dan_player/desktop_tray_appearance.dart';
 import 'package:dan_player/font/app_font_manager.dart';
 import 'package:desktop_lyric/font_policy.dart';
-import 'package:dan_player/component/app_shape.dart';
-import 'dart:io';
 
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_fonts.dart';
@@ -41,6 +45,8 @@ class DesktopPlaybackSnapshot {
     this.buffering = false,
     this.desktopLyrics = false,
     this.title = '',
+    this.trackTitle = '',
+    this.trackArtist = '',
     this.preview,
   });
 
@@ -51,6 +57,8 @@ class DesktopPlaybackSnapshot {
   final bool buffering;
   final bool desktopLyrics;
   final String title;
+  final String trackTitle;
+  final String trackArtist;
   final TaskbarPreviewTrack? preview;
 
   bool allows(String action) => switch (action) {
@@ -68,6 +76,8 @@ class DesktopPlaybackSnapshot {
         'buffering': buffering,
         'desktopLyrics': desktopLyrics,
         'title': title,
+        'trackTitle': trackTitle,
+        'trackArtist': trackArtist,
       };
 
   @override
@@ -80,11 +90,22 @@ class DesktopPlaybackSnapshot {
       buffering == other.buffering &&
       desktopLyrics == other.desktopLyrics &&
       title == other.title &&
+      trackTitle == other.trackTitle &&
+      trackArtist == other.trackArtist &&
       preview == other.preview;
 
   @override
-  int get hashCode => Object.hash(ready, hasTrack, hasQueue, playing, buffering,
-      desktopLyrics, title, preview);
+  int get hashCode => Object.hash(
+      ready,
+      hasTrack,
+      hasQueue,
+      playing,
+      buffering,
+      desktopLyrics,
+      title,
+      trackTitle,
+      trackArtist,
+      preview);
 }
 
 abstract interface class DesktopNativeAdapter {
@@ -230,6 +251,8 @@ class _DesktopPlaybackAdapter extends ValueNotifier<DesktopPlaybackSnapshot>
     _progressState = playback.playerState;
     _updateProgressSource();
     _publishProgress();
+    final trackTitle = audio == null ? '' : audio.displayTitle.trim();
+    final trackArtist = audio == null ? '' : audio.artist.trim();
     value = DesktopPlaybackSnapshot(
       ready: true,
       hasTrack: audio != null,
@@ -237,7 +260,11 @@ class _DesktopPlaybackAdapter extends ValueNotifier<DesktopPlaybackSnapshot>
       playing: _progressState.keepsPlaybackIntent,
       buffering: playback.isBuffering.value,
       desktopLyrics: _lyrics!.isRunning || _lyrics!.isStarting,
-      title: audio == null ? '' : '${audio.displayTitle} — ${audio.artist}',
+      title: audio == null
+          ? ''
+          : (trackArtist.isEmpty ? trackTitle : '$trackTitle — $trackArtist'),
+      trackTitle: trackTitle,
+      trackArtist: trackArtist,
       preview: audio == null ? null : TaskbarPreviewTrack.fromAudio(audio),
     );
   }
@@ -412,6 +439,103 @@ class DesktopIntegration implements Listenable {
   bool? _sentRoundedCorners;
   (bool, int, String, String, AppFontPolicy?)? _sentAppearance;
   UiLanguage? _sentLanguage;
+  Object? _trayCoverIdentity;
+  int _trayCoverGeneration = 0;
+
+  void _syncTrayCover(TaskbarPreviewTrack? track) {
+    if (!_syncAppearance || _closed) return;
+    final nextIdentity = track?.identity;
+    if (nextIdentity == _trayCoverIdentity) return;
+    _trayCoverIdentity = nextIdentity;
+    final generation = ++_trayCoverGeneration;
+    if (track == null || track.loadArtwork == null) {
+      unawaited(_invoke('clearTrayCover').catchError((Object _) => null));
+      return;
+    }
+    unawaited(_loadAndSendTrayCover(track, generation));
+  }
+
+  Future<void> _loadAndSendTrayCover(
+    TaskbarPreviewTrack track,
+    int generation,
+  ) async {
+    ImageInfo? resolvedInfo;
+    dart_ui.Image? rasterized;
+    dart_ui.Picture? picture;
+    try {
+      final provider = await track.loadArtwork!();
+      if (_closed || generation != _trayCoverGeneration) return;
+      if (provider == null) {
+        await _invoke('clearTrayCover');
+        return;
+      }
+      final completer = Completer<ImageInfo?>();
+      final stream = provider.resolve(ImageConfiguration.empty);
+      late final ImageStreamListener listener;
+      listener = ImageStreamListener(
+        (info, _) {
+          stream.removeListener(listener);
+          if (!completer.isCompleted) {
+            completer.complete(info);
+          } else {
+            info.dispose();
+          }
+        },
+        onError: (Object _, StackTrace? __) {
+          stream.removeListener(listener);
+          if (!completer.isCompleted) completer.complete(null);
+        },
+      );
+      stream.addListener(listener);
+      resolvedInfo = await completer.future.timeout(
+        const Duration(seconds: 3),
+        onTimeout: () {
+          stream.removeListener(listener);
+          return null;
+        },
+      );
+      if (_closed || generation != _trayCoverGeneration) return;
+      if (resolvedInfo == null) {
+        await _invoke('clearTrayCover');
+        return;
+      }
+      const edge = 128;
+      final src = resolvedInfo.image;
+      final side = math.min(src.width, src.height).toDouble();
+      final srcRect = Rect.fromLTWH(
+        (src.width - side) * 0.5,
+        (src.height - side) * 0.5,
+        side,
+        side,
+      );
+      final recorder = dart_ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.drawImageRect(
+        src,
+        srcRect,
+        const Rect.fromLTWH(0, 0, edge * 1.0, edge * 1.0),
+        Paint()..filterQuality = FilterQuality.medium,
+      );
+      picture = recorder.endRecording();
+      rasterized = await picture.toImage(edge, edge);
+      final byteData =
+          await rasterized.toByteData(format: dart_ui.ImageByteFormat.rawRgba);
+      if (_closed || generation != _trayCoverGeneration || byteData == null) {
+        return;
+      }
+      await _invoke('setTrayCover', {
+        'width': edge,
+        'height': edge,
+        'pixels': byteData.buffer.asUint8List(),
+      });
+    } catch (_) {
+      // Optional visual enhancement; fallback emblem renders natively.
+    } finally {
+      picture?.dispose();
+      rasterized?.dispose();
+      resolvedInfo?.dispose();
+    }
+  }
 
   Map<String, String> _menuLabels() => {
         'showMain': ui('显示主窗口'),
@@ -653,6 +777,7 @@ class DesktopIntegration implements Listenable {
       if (_closed) return;
       // Artwork loading/rendering is not in _nativeTail: slow covers cannot
       // delay play/pause buttons, tray restoration or exit.
+      _syncTrayCover(_playback.value.preview);
       _preview?.synchronize(
           enabled: _preferences.value.taskbarSongPreview,
           track: _playback.value.preview?.withPlaybackState(
@@ -751,7 +876,11 @@ class DesktopIntegration implements Listenable {
     } else if (call.method == 'taskbarLyricsLayoutChanged') {
       _applyTaskbarLyricsLayout(call.arguments);
     } else if (call.method == 'action' && call.arguments is String) {
-      await dispatchAction(call.arguments as String);
+      final action = call.arguments as String;
+      if (_syncAppearance && action != 'exit') {
+        TouchSoundService.instance.playTick();
+      }
+      await dispatchAction(action);
     }
   }
 

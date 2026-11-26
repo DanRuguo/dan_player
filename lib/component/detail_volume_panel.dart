@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/text_motion_stabilizer.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
@@ -122,7 +123,19 @@ class _DetailVolumeButtonState extends State<DetailVolumeButton> {
             controller.open();
           }
         },
-        icon: Icon(_value == 0 ? Symbols.volume_off : Symbols.volume_up),
+        icon: AnimatedSwitcher(
+          duration: AppMotion.duration(
+            context,
+            MotionKind.feedback,
+            AppMotion.quick,
+          ),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          child: Icon(
+            _value == 0 ? Symbols.volume_off : Symbols.volume_up,
+            key: ValueKey(_value == 0),
+          ),
+        ),
         color: scheme.primary,
       ),
     );
@@ -211,12 +224,23 @@ class _DetailVolumePanelState extends State<DetailVolumePanel> {
                     tooltip: ui(volume == 0 ? '恢复音量' : '静音'),
                     onPressed: _mute,
                     visualDensity: VisualDensity.compact,
-                    icon: Icon(
+                    icon: AnimatedSwitcher(
+                      duration: AppMotion.duration(
+                        context,
+                        MotionKind.feedback,
+                        AppMotion.quick,
+                      ),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      child: Icon(
                         volume == 0
                             ? Icons.volume_off_outlined
                             : Icons.volume_up_outlined,
+                        key: ValueKey(volume == 0),
                         size: 20,
-                        color: theme.colorScheme.primary)),
+                        color: theme.colorScheme.primary,
+                      ),
+                    )),
                 const SizedBox(width: 6),
                 Expanded(
                     child: Text(ui('音量'), style: theme.textTheme.titleSmall)),

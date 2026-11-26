@@ -10,6 +10,7 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/background_preferences.dart';
 import 'package:dan_player/library/cover_image_import.dart';
 import 'package:dan_player/library/artwork_animation_provider.dart';
+import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'package:flutter/painting.dart';
 import 'package:path/path.dart' as path;
 
@@ -69,6 +70,7 @@ class BackgroundImageStore {
   bool _validImageId(Object? id) =>
       coverImages ? isImportedCoverId(id) : isBackgroundImageId(id);
   final _images = <String, Future<ImageProvider?>>{};
+  final _resolved = <String, ImageProvider?>{};
   Future<void> _operation = Future.value();
 
   Future<T> _serial<T>(Future<T> Function() action) {
@@ -230,6 +232,7 @@ class BackgroundImageStore {
       }
     }
     _images.remove(id);
+    _resolved.remove(id);
     var name = path.posix.basename(sourcePath.replaceAll('\\', '/'));
     name = name.replaceAll(RegExp(r'[\x00-\x1f\x7f]'), '');
     if (name.length > 180) name = name.substring(0, 180);
@@ -237,13 +240,38 @@ class BackgroundImageStore {
         id: id, name: name, width: width, height: height);
   }
 
+  ({bool hit, ImageProvider? provider}) peekImageFor(String? id) {
+    if (!_validImageId(id)) return (hit: true, provider: null);
+    if (_resolved.containsKey(id)) {
+      return (hit: true, provider: _resolved[id]);
+    }
+    return (hit: false, provider: null);
+  }
+
   Future<ImageProvider?> imageFor(String? id) {
-    if (!_validImageId(id)) return Future.value();
+    if (!_validImageId(id)) return SynchronousFuture<ImageProvider?>(null);
     final previous = _images.remove(id);
-    final request = previous ?? _readImage(id!);
-    _images[id!] = request;
+    if (previous != null) {
+      _images[id!] = previous;
+      if (_resolved.containsKey(id)) {
+        final resolved = _resolved.remove(id);
+        _resolved[id] = resolved;
+      }
+      return previous;
+    }
+    late final Future<ImageProvider?> request;
+    request = _readImage(id!).then((image) {
+      if (identical(_images[id], request)) {
+        _images[id] = SynchronousFuture<ImageProvider?>(image);
+        _resolved[id] = image;
+      }
+      return image;
+    });
+    _images[id] = request;
     while (_images.length > 6) {
-      _images.remove(_images.keys.first);
+      final oldest = _images.keys.first;
+      _images.remove(oldest);
+      _resolved.remove(oldest);
     }
     return request;
   }
@@ -252,12 +280,16 @@ class BackgroundImageStore {
   /// original and all references even if it is temporarily unreadable.
   Future<ImageProvider?> reloadImage(String id) async {
     final old = _images.remove(id);
+    _resolved.remove(id);
     if (old != null) await _evictImage(await old);
     final image = await _readImage(id);
     await _evictImage(image);
-    _images[id] = Future.value(image);
+    _images[id] = SynchronousFuture<ImageProvider?>(image);
+    _resolved[id] = image;
     while (_images.length > 6) {
-      _images.remove(_images.keys.first);
+      final oldest = _images.keys.first;
+      _images.remove(oldest);
+      _resolved.remove(oldest);
     }
     return image;
   }
@@ -312,6 +344,7 @@ class BackgroundImageStore {
           }
           await entry.delete();
           _images.remove(id);
+          _resolved.remove(id);
           removed++;
         }
         return removed;

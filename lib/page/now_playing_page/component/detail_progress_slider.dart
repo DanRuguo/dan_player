@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_motion.dart';
+import 'package:desktop_lyric/component/text_pixel_snap.dart';
 import 'package:dan_player/component/app_menu_anchor.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_shape.dart';
@@ -114,6 +115,8 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
   DetailPositionFollow? _follow;
   late final AnimationController _waveformTransition;
   late final AnimationController _handleTransition;
+  late final AnimationController _timeModeTransition;
+  late final Animation<double> _timeModeOpacity;
   double _handleFrom = 18, _handleTo = 18, _handlePaintedHeight = 18;
   bool _handleJumpPending = false, _handleTweenActive = false;
   int _handleGeneration = 0;
@@ -190,6 +193,11 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
       ..addStatusListener((status) {
         if (status == AnimationStatus.completed) _handleTweenActive = false;
       });
+    _timeModeTransition = AnimationController(
+        vsync: this, value: 1, duration: AppMotion.quick);
+    _timeModeOpacity = Tween<double>(begin: .35, end: 1.0).animate(
+        CurvedAnimation(
+            parent: _timeModeTransition, curve: Curves.easeOutCubic));
     _lifecycle = WidgetsBinding.instance.lifecycleState;
     WidgetsBinding.instance.addObserver(this);
     widget.hidden?.addListener(_syncActivity);
@@ -398,6 +406,10 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
       _handleJumpPending = _handleTweenActive = false;
       _handleTransition.stop();
       _handleTransition.value = 1;
+      if (_timeModeTransition.isAnimating) {
+        _timeModeTransition.stop();
+        _timeModeTransition.value = 1;
+      }
     }
   }
 
@@ -628,6 +640,7 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
     _smoothing.dispose();
     _waveformTransition.dispose();
     _handleTransition.dispose();
+    _timeModeTransition.dispose();
     _display.dispose();
     _elapsed.dispose();
     _hoverPosition.dispose();
@@ -777,23 +790,55 @@ class _DetailProgressSliderState extends State<DetailProgressSlider>
                     child: InkWell(
                       key: const ValueKey('detail-progress-time-mode'),
                       borderRadius: AppShape.smallRadius,
-                      onTap: () =>
-                          setState(() => _showRemaining = !_showRemaining),
+                      onTap: () {
+                        setState(() => _showRemaining = !_showRemaining);
+                        if (motion) {
+                          _timeModeTransition.forward(from: 0);
+                        } else {
+                          _timeModeTransition.value = 1;
+                        }
+                      },
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 6),
-                        child: ValueListenableBuilder<int>(
-                          valueListenable: _elapsed,
-                          builder: (context, position, _) => Text(
-                            _showRemaining
-                                ? '−${_time((_length - position).clamp(0.0, _length))}'
-                                : _time(_length),
-                            key: const ValueKey('detail-progress-total'),
-                            semanticsLabel: _showRemaining
-                                ? ui('剩余 {0}', [
-                                    _time((_length - position)
-                                        .clamp(0.0, _length))
-                                  ])
-                                : null,
+                        child: FadeTransition(
+                          opacity: _timeModeOpacity,
+                          alwaysIncludeSemantics: true,
+                          child: AnimatedBuilder(
+                            animation: _timeModeTransition,
+                            child: ValueListenableBuilder<int>(
+                              valueListenable: _elapsed,
+                              builder: (context, position, _) => Text(
+                                _showRemaining
+                                    ? '−${_time((_length - position).clamp(0.0, _length))}'
+                                    : _time(_length),
+                                key: const ValueKey('detail-progress-total'),
+                                semanticsLabel: _showRemaining
+                                    ? ui('剩余 {0}', [
+                                        _time((_length - position)
+                                            .clamp(0.0, _length))
+                                      ])
+                                    : null,
+                              ),
+                            ),
+                            builder: (context, child) {
+                              final offset = _timeModeTransition.value >= 1
+                                  ? Offset.zero
+                                  : snapOffsetToPhysicalPixel(
+                                      Offset(
+                                        0,
+                                        (1 -
+                                                Curves.easeOutCubic.transform(
+                                                    _timeModeTransition
+                                                        .value)) *
+                                            3,
+                                      ),
+                                      MediaQuery.devicePixelRatioOf(context),
+                                    );
+                              return Transform.translate(
+                                offset: offset,
+                                child: child,
+                              );
+                            },
                           ),
                         ),
                       ),

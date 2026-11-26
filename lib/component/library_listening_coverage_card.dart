@@ -19,9 +19,9 @@ class LibraryListeningCoverageCard extends StatelessWidget {
     return Card.filled(
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-            borderRadius: AppShape.controlRadius,
+            borderRadius: AppShape.surfaceRadius,
             side: BorderSide(
-                color: scheme.outlineVariant.withValues(alpha: .55))),
+                color: scheme.outlineVariant.withValues(alpha: .5))),
         color: scheme.surfaceContainerLow,
         child: Padding(
             padding: const EdgeInsets.all(18),

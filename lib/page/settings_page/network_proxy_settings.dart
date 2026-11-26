@@ -325,20 +325,16 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
                   icon: Icons.tune_outlined),
             ],
           ),
-          const SizedBox(height: 10),
-          Text(
-            _mode == NetworkProxyMode.system
-                ? ui('使用 Windows 当前静态代理，未配置时直连；自动代理脚本请改用自定义 HTTP 代理。')
-                : _mode == NetworkProxyMode.direct
-                    ? ui('播放器直接连接，不经过系统或自定义代理。')
-                    : ui('填写代理主机或完整 HTTP 链接和端口，例如 127.0.0.1 与 7890。'),
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(color: scheme.onSurfaceVariant),
-          ),
+          const SizedBox(height: 12),
           if (_mode == NetworkProxyMode.custom) ...[
-            const SizedBox(height: 14),
+            Text(
+              ui('填写代理主机或完整 HTTP 链接和端口，例如 127.0.0.1 与 7890。'),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 12),
             LayoutBuilder(builder: (context, constraints) {
               final stacked = constraints.maxWidth < 520 ||
                   MediaQuery.textScalerOf(context).scale(1) > 1.3;
@@ -378,59 +374,85 @@ class _NetworkProxySettingsState extends State<NetworkProxySettings> {
                       Expanded(flex: 2, child: portField),
                     ]);
             }),
-            const SizedBox(height: 6),
-            Text(ui('地址已包含端口时，端口输入框可留空。'),
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: scheme.onSurfaceVariant)),
           ],
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.end,
-            children: [
-              OutlinedButton.icon(
-                key: const ValueKey('network-proxy-test'),
-                onPressed:
-                    _testing || _saving ? null : () => unawaited(_test()),
-                icon: _testing
-                    ? const SettingsBusyIndicator.circular(size: 16)
-                    : const Icon(Icons.network_check_outlined),
-                label: Text(ui('测试 GitHub 连接')),
-              ),
-              AnimatedSwitcher(
-                key: const ValueKey('network-proxy-save-transition'),
-                duration: AppMotion.duration(
-                    context, MotionKind.layout, AppMotion.standard),
-                switchInCurve: AppMotion.standardCurve,
-                switchOutCurve: AppMotion.standardCurve,
-                transitionBuilder: (child, animation) => SizeTransition(
-                  axis: Axis.horizontal,
-                  alignment: Alignment.centerRight,
-                  sizeFactor: animation,
-                  child: FadeTransition(opacity: animation, child: child),
+          const SizedBox(height: 10),
+          LayoutBuilder(builder: (context, constraints) {
+            final hintText = Text(
+              _mode == NetworkProxyMode.system
+                  ? ui('使用 Windows 当前静态代理，未配置时直连；自动代理脚本请改用自定义 HTTP 代理。')
+                  : _mode == NetworkProxyMode.direct
+                      ? ui('播放器直接连接，不经过系统或自定义代理。')
+                      : ui('地址已包含端口时，端口输入框可留空。'),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: scheme.onSurfaceVariant),
+            );
+            final actionButtons = Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                OutlinedButton.icon(
+                  key: const ValueKey('network-proxy-test'),
+                  onPressed:
+                      _testing || _saving ? null : () => unawaited(_test()),
+                  icon: _testing
+                      ? const SettingsBusyIndicator.circular(size: 16)
+                      : const Icon(Icons.network_check_outlined),
+                  label: Text(ui('测试 GitHub 连接')),
                 ),
-                child: _mode == NetworkProxyMode.custom
-                    ? FilledButton.icon(
-                        key: const ValueKey('network-proxy-save'),
-                        onPressed: _saving ? null : () => unawaited(_save()),
-                        icon: const Icon(Icons.save_outlined),
-                        label: Text(ui('保存并应用')),
-                      )
-                    : _retryNeeded
-                        ? FilledButton.icon(
-                            key: const ValueKey('network-proxy-retry'),
-                            onPressed: _saving ? null : _retryPersist,
-                            icon: const Icon(Icons.refresh_outlined),
-                            label: Text(ui('重试保存')),
-                          )
-                        : const SizedBox.shrink(
-                            key: ValueKey('network-proxy-save-hidden')),
-              ),
-            ],
-          ),
+                AnimatedSwitcher(
+                  key: const ValueKey('network-proxy-save-transition'),
+                  duration: AppMotion.duration(
+                      context, MotionKind.layout, AppMotion.standard),
+                  switchInCurve: AppMotion.standardCurve,
+                  switchOutCurve: AppMotion.standardCurve,
+                  transitionBuilder: (child, animation) => SizeTransition(
+                    axis: Axis.horizontal,
+                    alignment: Alignment.centerRight,
+                    sizeFactor: animation,
+                    child: FadeTransition(opacity: animation, child: child),
+                  ),
+                  child: _mode == NetworkProxyMode.custom
+                      ? FilledButton.icon(
+                          key: const ValueKey('network-proxy-save'),
+                          onPressed: _saving ? null : () => unawaited(_save()),
+                          icon: const Icon(Icons.save_outlined),
+                          label: Text(ui('保存并应用')),
+                        )
+                      : _retryNeeded
+                          ? FilledButton.icon(
+                              key: const ValueKey('network-proxy-retry'),
+                              onPressed: _saving ? null : _retryPersist,
+                              icon: const Icon(Icons.refresh_outlined),
+                              label: Text(ui('重试保存')),
+                            )
+                          : const SizedBox.shrink(
+                              key: ValueKey('network-proxy-save-hidden')),
+                ),
+              ],
+            );
+            final scale = MediaQuery.textScalerOf(context).scale(1);
+            if (constraints.maxWidth >= 520 * scale) {
+              return Row(
+                children: [
+                  Expanded(child: hintText),
+                  const SizedBox(width: 16),
+                  actionButtons,
+                ],
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                hintText,
+                const SizedBox(height: 10),
+                Align(alignment: Alignment.centerRight, child: actionButtons),
+              ],
+            );
+          }),
           if (_error != null || _result != null) ...[
             const SizedBox(height: 10),
             Semantics(

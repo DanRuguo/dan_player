@@ -1,17 +1,19 @@
 import 'dart:async';
 
-import 'package:dan_player/component/eq_presets_dialog.dart';
+import 'package:dan_player/component/app_dialog_actions.dart';
+import 'package:dan_player/component/app_dialog_title.dart';
+import 'package:dan_player/component/app_horizontal_wheel_region.dart';
 import 'package:dan_player/component/app_presentation.dart';
+import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/eq_presets_dialog.dart';
+import 'package:dan_player/component/text_motion_stabilizer.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/src/bass/bass_player.dart';
 import 'package:dan_player/utils.dart';
-import 'package:dan_player/component/app_dialog_title.dart';
-import 'package:dan_player/component/text_motion_stabilizer.dart';
-import 'package:flutter/material.dart';
-import 'package:dan_player/component/app_horizontal_wheel_region.dart';
-import 'package:material_symbols_icons/symbols.dart';
 import 'package:desktop_lyric/ui_language.dart';
+import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 
 Future<void> showEqualizerDialog(BuildContext context) {
   return showAppDialog(
@@ -31,6 +33,21 @@ class EqualizerDialog extends StatefulWidget {
   /// The normal player watches the live service's cached native capabilities.
   final List<bool>? availableBands;
 
+  static const customPresetName = "自定义";
+  static const Map<String, List<double>> presets = {
+    "平坦": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    "流行": [-1.6, 4.8, 7.2, 8.0, 5.6, 0, -2.4, -2.4, -1.6, -1.6],
+    "摇滚": [8.0, 4.8, -5.6, -8.0, -3.2, 4.0, 8.8, 11.2, 11.2, 11.2],
+    "古典": [0, 0, 0, 0, 0, 0, -7.2, -7.2, -7.2, -9.6],
+    "爵士": [4.0, 3.0, 1.5, 2.0, -1.5, -1.5, 0, 1.5, 3.0, 3.5],
+    "人声": [-2.5, -1.0, 1.5, 3.5, 4.0, 3.5, 2.5, 1.0, 0, -1.5],
+    "电子": [5.5, 4.5, 1.5, -1.0, -2.0, 1.5, 3.0, 4.5, 5.5, 6.0],
+    "原声": [3.5, 3.0, 2.0, 0.5, 1.5, 1.5, 2.5, 3.0, 2.5, 1.5],
+    "通勤": [4.5, 3.5, 1.5, 2.5, 3.5, 3.0, 2.0, 1.0, 0.5, 0.0],
+    "低音增强": [9.0, 7.0, 5.5, 3.0, 1.0, 0, 0, 0, 0, 0],
+    "高音增强": [0, 0, 0, 0, 0, 1.0, 3.0, 5.5, 7.0, 9.0],
+  };
+
   @override
   State<EqualizerDialog> createState() => _EqualizerDialogState();
 }
@@ -45,6 +62,7 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
   bool _comparingOriginal = false;
   List<double>? _adjusted;
   bool? _adjustedEnabled;
+
   @override
   void initState() {
     super.initState();
@@ -100,17 +118,8 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
     super.dispose();
   }
 
-  static const customPresetName = "自定义";
-  static const Map<String, List<double>> presets = {
-    "平坦": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    "流行": [-1.6, 4.8, 7.2, 8.0, 5.6, 0, -2.4, -2.4, -1.6, -1.6],
-    "摇滚": [8.0, 4.8, -5.6, -8.0, -3.2, 4.0, 8.8, 11.2, 11.2, 11.2],
-    "古典": [0, 0, 0, 0, 0, 0, -7.2, -7.2, -7.2, -9.6],
-    "爵士": [4.0, 3.0, 1.5, 2.0, -1.5, -1.5, 0, 1.5, 3.0, 3.5],
-    "人声": [-2.5, -1.0, 1.5, 3.5, 4.0, 3.5, 2.5, 1.0, 0, -1.5],
-    "低音增强": [9.0, 7.0, 5.5, 3.0, 1.0, 0, 0, 0, 0, 0],
-    "高音增强": [0, 0, 0, 0, 0, 1.0, 3.0, 5.5, 7.0, 9.0],
-  };
+  static const customPresetName = EqualizerDialog.customPresetName;
+  static const Map<String, List<double>> presets = EqualizerDialog.presets;
 
   late bool enabled = playbackService.eqEnabled.value;
   late List<double> gains = List.of(playbackService.eqGains);
@@ -174,6 +183,7 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
 
   Widget _dialog(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
     final available = widget.availableBands ??
         (widget.playbackService == null
             ? playbackService.eqAvailableBands
@@ -183,22 +193,21 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
         if (!available[band]) _bandLabel(BassPlayer.eqBandCenters[band]),
     ];
     return AlertDialog(
-      // Title and controls scroll together; the completion action stays above
-      // any notification even in the smallest supported window at 200% text.
       scrollable: true,
       title: AppDialogTitle(
         ui("均衡器"),
+        leading: Icon(Symbols.equalizer, color: scheme.primary),
         sideExtent: 64,
         trailing: Switch(value: enabled, onChanged: _toggleEnabled),
       ),
       content: SizedBox(
-        width: 520,
+        width: 552,
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Wrap(spacing: 8, runSpacing: 8, children: [
-              OutlinedButton(
+              FilledButton.tonalIcon(
                   onPressed: () async {
                     await showEqPresets(context, playbackService);
                     if (mounted) {
@@ -212,10 +221,15 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
                       });
                     }
                   },
-                  child: Text(ui('用户预设'))),
-              OutlinedButton(
+                  icon: const Icon(Symbols.tune, size: 18),
+                  label: Text(ui('用户预设'))),
+              OutlinedButton.icon(
                   onPressed: _compare,
-                  child: Text(ui(_comparingOriginal ? '试听当前调节 B' : '试听原设置 A'))),
+                  icon: Icon(
+                    _comparingOriginal ? Symbols.compare_arrows : Symbols.hearing,
+                    size: 18,
+                  ),
+                  label: Text(ui(_comparingOriginal ? '试听当前调节 B' : '试听原设置 A'))),
               if (_adjusted != null) ...[
                 TextButton(
                     onPressed: () => _finishComparison(false),
@@ -230,8 +244,6 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
               children: [
                 Expanded(
                   child: DropdownMenu<String>(
-                    // DropdownMenu caches its text controller. Recreate only
-                    // this display control when language changes, not the EQ.
                     key: ValueKey((preset, uiLanguage.value)),
                     label: Text(ui("预设")),
                     initialSelection: preset,
@@ -255,49 +267,62 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
                 const SizedBox(width: 8),
                 IconButton(
                   tooltip: ui("重置为平坦"),
-                  // Preset lookup IDs remain stable in every UI language.
                   onPressed: () => _applyPreset("平坦"),
                   icon: const Icon(Symbols.restart_alt),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            AppHorizontalWheelRegion(
-                child: SingleChildScrollView(
-              key: const ValueKey('equalizer-bands-scroll'),
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  for (var band = 0;
-                      band < BassPlayer.eqBandCenters.length;
-                      band++)
-                    _BandSlider(
-                      label: _bandLabel(BassPlayer.eqBandCenters[band]),
-                      value: gains[band],
-                      enabled: enabled && available[band],
-                      available: available[band],
-                      onChanged: (value) {
-                        if (!_ownsEq()) return;
-                        playbackService.setEqBandGain(band, value);
-                        _ownedRevision = playbackService.eqEditRevision;
-                        setState(() {
-                          gains[band] = value;
-                          preset = customPresetName;
-                        });
-                      },
-                    ),
-                ],
+            const SizedBox(height: 14),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerLow,
+                borderRadius: AppShape.cardRadius,
+                border: Border.all(
+                  color: scheme.outlineVariant
+                      .withValues(alpha: isDark ? .38 : .46),
+                ),
               ),
-            )),
-            const SizedBox(height: 4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+                child: AppHorizontalWheelRegion(
+                  child: SingleChildScrollView(
+                    key: const ValueKey('equalizer-bands-scroll'),
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        for (var band = 0;
+                            band < BassPlayer.eqBandCenters.length;
+                            band++)
+                          _BandSlider(
+                            label: _bandLabel(BassPlayer.eqBandCenters[band]),
+                            value: gains[band],
+                            enabled: enabled && available[band],
+                            available: available[band],
+                            onChanged: (value) {
+                              if (!_ownsEq()) return;
+                              playbackService.setEqBandGain(band, value);
+                              _ownedRevision = playbackService.eqEditRevision;
+                              setState(() {
+                                gains[band] = value;
+                                preset = customPresetName;
+                              });
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
             if (unavailableLabels.isNotEmpty) ...[
               Text(
                 ui('当前音源不应用 {0} Hz 频段；保存的设置保持不变。',
                     [unavailableLabels.join(', ')]),
                 key: const ValueKey('equalizer-unavailable-bands'),
-                style: TextStyle(color: scheme.onSurfaceVariant),
+                style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
             ],
             Text(
               ui("调节范围 ±15 dB，换歌后继续保持。"),
@@ -310,9 +335,13 @@ class _EqualizerDialogState extends State<EqualizerDialog> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(ui("完成")),
+        AppDialogActions(
+          children: [
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(ui("完成")),
+            ),
+          ],
         ),
       ],
     );
@@ -338,24 +367,40 @@ class _BandSlider extends StatelessWidget {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
+    final activeNonZero = enabled && value.abs() >= 0.5;
     return Tooltip(
       message:
           available ? '$label Hz' : ui('此音源不应用 {0} Hz；设置会在支持的音源上恢复。', [label]),
       child: SizedBox(
-        width: 48,
+        width: 50,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              "${value >= 0 ? "+" : ""}${value.toStringAsFixed(0)}",
-              style: TextStyle(
-                fontSize: 12,
-                color: enabled ? scheme.onSurface : scheme.outline,
-                fontFeatures: tabularFiguresFeatures,
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: activeNonZero
+                    ? scheme.primaryContainer.withValues(alpha: .72)
+                    : Colors.transparent,
+                borderRadius: AppShape.pillRadius,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                child: Text(
+                  "${value >= 0 ? "+" : ""}${value.toStringAsFixed(0)}",
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight:
+                        activeNonZero ? FontWeight.w700 : FontWeight.w500,
+                    color: activeNonZero
+                        ? scheme.onPrimaryContainer
+                        : (enabled ? scheme.onSurface : scheme.outline),
+                    fontFeatures: tabularFiguresFeatures,
+                  ),
+                ),
               ),
             ),
             SizedBox(
-              height: 160,
+              height: 164,
               child: RotatedBox(
                 quarterTurns: 3,
                 child: Slider(
@@ -374,7 +419,8 @@ class _BandSlider extends StatelessWidget {
             Text(
               label,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
                 color: enabled ? scheme.onSurfaceVariant : scheme.outline,
                 fontFeatures: tabularFiguresFeatures,
               ),

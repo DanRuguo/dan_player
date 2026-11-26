@@ -46,11 +46,7 @@ Local playback comes first, with online music and custom sources alongside it.</
 </div>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/library-dark-wide.png">
-    <source media="(prefers-color-scheme: light)" srcset="docs/images/library-light-wide.png">
-    <img src="docs/images/library-light-wide.png" alt="Dan Player library and playback controls, using the Chinese interface and fictional data" width="1200">
-  </picture>
+  <img src="docs/images/snapshot8-categories-en.png" alt="Albums with custom artwork and mixed tile sizes" width="910">
 </p>
 
 <p align="center">
@@ -71,7 +67,7 @@ Local playback comes first, with online music and custom sources alongside it.</
 
 **Installer:** run the setup program; in-place upgrades are supported. **Portable:** extract the entire ZIP and launch `Dan Player.exe`—do not copy only the executable. Desktop lyrics run in a separate process launched from the same executable.
 
-The current portable ZIP includes FFmpeg, three offline Japanese reading datasets (the main dictionary, vocabulary supplement and kanji-reading supplement), and their licenses for previews, trimming and offline readings. The slim installer excludes these two component categories and preserves components already installed. You can download them manually from the player, with fixed-size and SHA-256 verification. FFmpeg uses the [standalone 26.0.5 component](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5); the reading data is available separately on the [26.1.1 release page](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.1).
+The snapshot 8 portable ZIP includes the audio build of FFmpeg 7.1.1 and three offline Japanese reading datasets. With the slim installer, add either component in Settings. The player downloads it from this release, checks its size and SHA-256, installs it under `tool`, and verifies the installed files. Both editions include the English IPA dictionary, which is under 1 MB. [Snapshot 8 release and components](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.2-snapshot.8)
 
 > **Downloads & signing:** project-built executables use an RCEIT.Inc self-signed certificate, so Windows may still display a trust warning. The installer does not automatically install a trusted certificate. To upgrade from an older signing certificate, download the new installer manually. Preview releases do not replace the stable release marked Latest. Back up your player data through the app's backup and restore settings before upgrading.
 
@@ -116,61 +112,13 @@ Main, desktop and taskbar lyrics share letter spacing. Generated Japanese readin
 
 ## Interface gallery
 
-### Up next and spectrum guide
+Use search filters or repeat a recent query. Open Report an issue under Update & About to review the last 15 days of logs. You can filter by session or severity and edit the report before opening a GitHub draft.
 
-These renders use actual components, the English interface and fictional data. The spectrum is a guide demonstration, not a live audio sample.
-
-| Four translucent upcoming cards | Rounded and pixel spectrum guide |
+| Search and recent queries | Report an issue |
 | --- | --- |
-| ![English upcoming preview with four translucent cards in two columns](docs/images/feature-upcoming-en.png) | ![English interactive guide showing rounded and pixel spectra](docs/images/feature-spectrum-guide-en.png) |
+| ![Search and recent queries](docs/images/snapshot8-search-en.png) | ![Report an issue](docs/images/snapshot8-report-en.png) |
 
-### Manual and on-demand monitoring
-
-These real component renders use the Chinese interface, fictional resource samples and example paths.
-
-| Everyday operations | Playback queue and interactive example |
-| --- | --- |
-| ![Instructions for music, categories and playlists](docs/images/manual-common-library.png) | ![Progress seeking example and queue instructions](docs/images/manual-playback-demo.png) |
-
-| Resource monitoring across surfaces | Cache storage categories |
-| --- | --- |
-| ![Shared resource monitoring in the sidebar and backup settings](docs/images/process-resource-locations.png) | ![Cache and player data storage categories in statistics](docs/images/cache-storage-statistics.png) |
-
-### Two ways to edit lyrics
-
-| Tap to time: prepare text | Tap to time: word timing in a narrow window |
-| --- | --- |
-| ![Chinese tap editor with lyrics, translation and pronunciation input](docs/images/lyric-tap-text-zh.png) | ![Chinese tap editor timing words in a narrow window](docs/images/lyric-tap-words-narrow-zh.png) |
-
-| Text editor: lyric markup | Text editor: word preview |
-| --- | --- |
-| ![Chinese text editor showing QRC lyric markup](docs/images/lyric-code-editor-zh.png) | ![Chinese text editor showing a word-timed preview](docs/images/lyric-editor-preview-zh.png) |
-
-### Organize your collection, your way
-
-| Playlists & collections | Appearance & settings |
-| --- | --- |
-| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/playlists-dark-wide.png"><img src="docs/images/playlists-light-wide.png" alt="Playlist organization in the Chinese interface" width="600"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/settings-dark-wide.png"><img src="docs/images/settings-light-wide.png" alt="Themes and grouped settings in the Chinese interface" width="600"></picture> |
-
-### Find a track and focus on its lyrics
-
-| Search & history | Mini player & lyrics |
-| --- | --- |
-| ![Search page content rendered from Flutter widgets, with centered history chips in English](docs/images/search-history-en.png) | ![Mini player and lyrics with fictional demonstration content](docs/images/feature-mini-lyrics-dark.png) |
-
-### Rediscover your library through listening history
-
-![Music statistics and rankings in the Chinese interface with fictional data](docs/images/statistics-rankings-light.png)
-
-<sub>These images render actual Flutter widgets with isolated demonstration data. The search image shows the English page content area and example history, not a complete native window; other examples mostly use the Chinese interface. They illustrate layout and features, not live audio or native desktop effects. See the <a href="docs/images/README.md">full gallery</a> for more themes, window sizes and all four interface languages.</sub>
-
-### Category tiles and getting started
-
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/feature-category-tiles-dark.png"><img src="docs/images/feature-category-tiles-light.png" alt="Independent category views and mixed cover sizes with fictional demo data" width="1200"></picture>
-
-| First-run guide: choose a language and try playback controls | Selective restore of player data and local music |
-| --- | --- |
-| ![First-run guide: choose a language and try playback controls](docs/images/feature-onboarding-en.png) | ![Selective restore of player data and local music](docs/images/feature-restore-en.png) |
+[More player screens and feature examples](docs/images/README.md)
 
 <a id="quick-start"></a>
 

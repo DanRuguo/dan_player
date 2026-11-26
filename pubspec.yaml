@@ -1,7 +1,7 @@
 name: dan_player
 description: Dan Player.
 publish_to: 'none'
-version: 26.1.2-snapshot.3
+version: 26.1.2-snapshot.8
 
 environment:
   sdk: '>=3.1.4 <4.0.0'
@@ -56,6 +56,7 @@ flutter:
   uses-material-design: true
   shaders:
     - assets/shaders/artwork_flow.frag
+    - assets/shaders/lyric_viewport_blur.frag
     - shaders/app_edge_stretch.frag
   assets:
     - third_party/desktop_lyric/shaders/FLUTTER-LICENSE.txt
@@ -65,3 +66,4 @@ flutter:
     - assets/images/RCE_logo_white.png
     - assets/branding/danruguo_light.png
     - assets/branding/danruguo_dark.png
+    - assets/dictionaries/cmudict_ipa.bin.gz

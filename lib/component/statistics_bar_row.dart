@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'package:dan_player/component/app_motion.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -26,7 +27,9 @@ class StatisticsBarRow extends StatelessWidget {
       this.wrapLabel = false,
       this.valueColumnWidth,
       this.progress,
-      this.showTooltip = true});
+      this.showTooltip = true,
+      this.showDetailSubtitle = false,
+      this.animateBar = false});
   final bool wrapLabel;
   final String label, detail, valueLabel;
   final double value, maximum;
@@ -39,6 +42,12 @@ class StatisticsBarRow extends StatelessWidget {
 
   /// Disabled for nonpainted layout templates, which need no pointer routes.
   final bool showTooltip;
+
+  /// Displays [detail] as a secondary single-line caption below [label].
+  final bool showDetailSubtitle;
+
+  /// Smoothly interpolates bar width changes when switching ranking groups.
+  final bool animateBar;
 
   static double measureValues(BuildContext context, Iterable<String> values) {
     final painter = TextPainter(
@@ -58,30 +67,105 @@ class StatisticsBarRow extends StatelessWidget {
     return width + 2;
   }
 
+  Widget _buildRankBadge(BuildContext context, int rank, double scale) {
+    final scheme = Theme.of(context).colorScheme;
+    final (Color bg, Color fg, Color border) = switch (rank) {
+      1 => (
+          scheme.primaryContainer,
+          scheme.onPrimaryContainer,
+          scheme.primary.withValues(alpha: 0.55),
+        ),
+      2 => (
+          scheme.secondaryContainer,
+          scheme.onSecondaryContainer,
+          scheme.secondary.withValues(alpha: 0.45),
+        ),
+      3 => (
+          scheme.tertiaryContainer,
+          scheme.onTertiaryContainer,
+          scheme.tertiary.withValues(alpha: 0.45),
+        ),
+      _ => (
+          scheme.surfaceContainerHighest.withValues(alpha: 0.65),
+          scheme.onSurfaceVariant,
+          Colors.transparent,
+        ),
+    };
+    final badgeSize = (24.0 * scale).clamp(22.0, 34.0);
+    return Padding(
+      padding: const EdgeInsets.only(right: 10),
+      child: Container(
+        width: badgeSize,
+        height: badgeSize,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(7),
+          border: border == Colors.transparent ? null : Border.all(color: border),
+        ),
+        child: Text(
+          '$rank',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: fg,
+                fontWeight: rank <= 3 ? FontWeight.w800 : FontWeight.w600,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final fraction = maximum.isFinite && maximum > 0 && value.isFinite
         ? (value / maximum).clamp(0.0, 1.0)
         : 0.0;
     final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
     final numberWidth =
         valueColumnWidth ?? measureValues(context, [valueLabel]);
+    final primaryTitleStyle = rank != null && rank! <= 3
+        ? theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)
+        : null;
     final labelText = showTooltip
         ? Text(label,
+            style: primaryTitleStyle,
             maxLines: wrapLabel ? null : 1,
             overflow: wrapLabel ? TextOverflow.visible : TextOverflow.ellipsis)
         : RichText(
             text: TextSpan(
-                text: label, style: DefaultTextStyle.of(context).style),
+                text: label,
+                style: DefaultTextStyle.of(context)
+                    .style
+                    .merge(primaryTitleStyle)),
             textDirection: Directionality.of(context),
             textScaler: MediaQuery.textScalerOf(context),
             maxLines: wrapLabel ? null : 1,
             overflow: wrapLabel ? TextOverflow.visible : TextOverflow.ellipsis);
-    final title = showTooltip
-        ? Tooltip(message: '$label\n$detail', child: labelText)
+    final labelBlock = showDetailSubtitle && detail.trim().isNotEmpty
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              labelText,
+              const SizedBox(height: 2),
+              Text(
+                detail,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  fontSize: 11.5,
+                ),
+              ),
+            ],
+          )
         : labelText;
-    final amountStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
+    final title = showTooltip
+        ? Tooltip(message: '$label\n$detail', child: labelBlock)
+        : labelBlock;
+    final amountStyle = theme.textTheme.labelLarge?.copyWith(
         color: scheme.primary,
         fontWeight: FontWeight.w600,
         fontFeatures: const [FontFeature.tabularFigures()]);
@@ -94,7 +178,7 @@ class StatisticsBarRow extends StatelessWidget {
             textAlign: TextAlign.right,
             textDirection: Directionality.of(context),
             textScaler: MediaQuery.textScalerOf(context));
-    Widget paintBar(double progress) => ClipRRect(
+    Widget paintBar(double currentFraction) => ClipRRect(
         borderRadius: BorderRadius.circular(5),
         child: SizedBox(
             height: 8,
@@ -103,32 +187,43 @@ class StatisticsBarRow extends StatelessWidget {
                 child: Align(
                     alignment: Alignment.centerLeft,
                     child: FractionallySizedBox(
-                        widthFactor: fraction * progress.clamp(0.0, 1.0),
+                        widthFactor: currentFraction.clamp(0.0, 1.0),
                         heightFactor: 1,
                         child: ColoredBox(
                             color: StatisticsMagnitudeColor.resolve(
                                 scheme, fraction)))))));
-    final bar = progress == null
-        ? paintBar(1)
-        : ValueListenableBuilder<double>(
-            valueListenable: progress!,
-            builder: (context, value, child) => paintBar(value));
+    final Widget bar;
+    if (progress != null) {
+      bar = ValueListenableBuilder<double>(
+        valueListenable: progress!,
+        builder: (context, p, child) => paintBar(fraction * p.clamp(0.0, 1.0)),
+      );
+    } else if (animateBar) {
+      final duration = AppMotion.duration(
+        context,
+        MotionKind.layout,
+        AppMotion.standard,
+      );
+      bar = TweenAnimationBuilder<double>(
+        tween: Tween<double>(end: fraction),
+        duration: duration,
+        curve: AppMotion.standardCurve,
+        builder: (context, animatedFraction, _) => paintBar(animatedFraction),
+      );
+    } else {
+      bar = paintBar(fraction);
+    }
     return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: LayoutBuilder(builder: (context, constraints) {
-          final rankWidth = rank == null ? 0.0 : 28 * scale;
+          final rankWidth =
+              rank == null ? 0.0 : (24.0 * scale).clamp(22.0, 34.0) + 10.0;
           final width = constraints.maxWidth - rankWidth;
-          final labelWidth = (width * .24).clamp(90 * scale, 240 * scale);
+          final labelWidth = (width * .30).clamp(96 * scale, 250 * scale);
           final inline = width - labelWidth - numberWidth - 24 >= 90 * scale &&
               (!wrapLabel || width / scale >= 600);
           return Row(children: [
-            if (rank != null)
-              SizedBox(
-                  width: rankWidth,
-                  child: Text('$rank',
-                      style: TextStyle(
-                          color: scheme.primary,
-                          fontFeatures: const [FontFeature.tabularFigures()]))),
+            if (rank != null) _buildRankBadge(context, rank!, scale),
             Expanded(
                 child: inline
                     ? Row(children: [

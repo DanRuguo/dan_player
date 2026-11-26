@@ -3,6 +3,7 @@ import 'package:dan_player/component/local_lyric_batch_dialog.dart';
 import 'package:dan_player/component/personal_library_dialog.dart';
 import 'dart:async';
 
+import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/component/playlist_destination_dialog.dart';
 import 'package:dan_player/component/playlist_exchange_dialog.dart';
@@ -65,25 +66,50 @@ class AudioSelectionToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
+    final scheme = Theme.of(context).colorScheme;
     return Wrap(
       key: const ValueKey('audio-selection-toolbar'),
       spacing: 8,
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Tooltip(
-            message: hiddenSelectionCount > 0
-                ? ui('另有 {0} 首被筛选隐藏；操作仅作用于当前可见所选', [hiddenSelectionCount])
-                : ui('按当前显示顺序处理所选歌曲'),
-            child: Text(
-                hiddenSelectionCount > 0
-                    ? ui('当前已选 {0} 首 · 隐藏 {1} 首',
-                        [selected.length, hiddenSelectionCount])
-                    : ui('已选 {0} 首', [selected.length]),
-                key: const ValueKey('audio-selection-count'),
-                style: Theme.of(context).textTheme.labelLarge),
+        Tooltip(
+          message: hiddenSelectionCount > 0
+              ? ui('另有 {0} 首被筛选隐藏；操作仅作用于当前可见所选', [hiddenSelectionCount])
+              : ui('按当前显示顺序处理所选歌曲'),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: scheme.secondaryContainer.withValues(alpha: .68),
+              borderRadius: AppShape.pillRadius,
+              border: Border.all(
+                color: scheme.primary.withValues(alpha: .20),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.check_circle_outline_rounded,
+                    size: 17,
+                    color: scheme.onSecondaryContainer,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    hiddenSelectionCount > 0
+                        ? ui('当前已选 {0} 首 · 隐藏 {1} 首',
+                            [selected.length, hiddenSelectionCount])
+                        : ui('已选 {0} 首', [selected.length]),
+                    key: const ValueKey('audio-selection-count'),
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: scheme.onSecondaryContainer,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
         FilledButton(

@@ -1146,12 +1146,20 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                       counterText: '',
                       isDense: true,
                       filled: !widget.immersive,
-                      enabledBorder: widget.immersive ? InputBorder.none : null,
-                      focusedBorder: widget.immersive ? InputBorder.none : null,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                      enabledBorder: widget.immersive
+                          ? InputBorder.none
+                          : AppShape.searchBorder(
+                              scheme.outlineVariant.withValues(alpha: .44)),
+                      focusedBorder: widget.immersive
+                          ? InputBorder.none
+                          : AppShape.searchBorder(scheme.primary, 1.8),
                       fillColor: scheme.surfaceContainerLow,
                       prefixIcon: Tooltip(
                         message: ui('支持拼音、首字母、重音与全角匹配，以及英文拼写容错；多个词需同时匹配。'),
-                        child: Icon(Symbols.search, color: scheme.primary),
+                        child: Icon(Symbols.search,
+                            size: 20, color: scheme.primary),
                       ),
                       suffixIcon: _query.isEmpty
                           ? null
@@ -1162,10 +1170,11 @@ class _CurrentPlaylistViewState extends State<CurrentPlaylistView> {
                                 _searchController.clear();
                                 _updateQuery('');
                               },
-                              icon: const Icon(Symbols.close)),
-                      border: OutlineInputBorder(
-                          borderRadius: AppShape.controlRadius,
-                          borderSide: BorderSide(color: scheme.outlineVariant)),
+                              icon: const Icon(Symbols.close, size: 19)),
+                      border: widget.immersive
+                          ? InputBorder.none
+                          : AppShape.searchBorder(
+                              scheme.outlineVariant.withValues(alpha: .44)),
                     ),
                   ),
                 ),

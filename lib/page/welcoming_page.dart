@@ -86,7 +86,10 @@ class _WelcomingPageState extends State<WelcomingPage> {
                           decoration: BoxDecoration(
                             color: scheme.surfaceContainerLow,
                             borderRadius: BorderRadius.circular(24),
-                            border: Border.all(color: scheme.outlineVariant),
+                            border: Border.all(
+                              color:
+                                  scheme.outlineVariant.withValues(alpha: .44),
+                            ),
                           ),
                           child: Padding(
                             padding: EdgeInsets.all(compact ? 20 : 32),
@@ -239,15 +242,21 @@ class _FolderSelectorViewState extends State<FolderSelectorView> {
       constraints: const BoxConstraints(maxWidth: 440),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         if (folders.isNotEmpty) ...[
-          Container(
+          AnimatedContainer(
+            duration: AppMotion.duration(
+                context, MotionKind.layout, AppMotion.standard),
+            curve: AppMotion.standardCurve,
             height: (folders.length * 56.0).clamp(56.0, 224.0),
-            decoration: BoxDecoration(
+            child: Material(
               color: scheme.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: scheme.outlineVariant),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
+              surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(
+                  color: scheme.outlineVariant.withValues(alpha: .46),
+                ),
+              ),
+              clipBehavior: Clip.antiAlias,
               child: ListView.builder(
                 itemCount: folders.length,
                 itemBuilder: (context, i) => AppEntrance(

@@ -36,6 +36,7 @@ class LyricViewTile extends StatelessWidget {
     this.spacingSource,
     this.sourceIdentity,
     this.japaneseReadingTransitionIdentity,
+    this.englishPhoneticTransitionIdentity,
     this.distance = 1,
     this.onTap,
     this.onPractice,
@@ -53,6 +54,7 @@ class LyricViewTile extends StatelessWidget {
   final Object? spacingSource;
   final Object? sourceIdentity;
   final Object? japaneseReadingTransitionIdentity;
+  final Object? englishPhoneticTransitionIdentity;
   final VoidCallback? onTap;
   final VoidCallback? onPractice;
   final VoidCallback? onContentRevealEnd;
@@ -103,6 +105,9 @@ class LyricViewTile extends StatelessWidget {
     final japaneseReading = line.japaneseReading?.trim().isNotEmpty == true
         ? line.japaneseReading
         : null;
+    final englishPhonetic = line.englishPhonetic?.trim().isNotEmpty == true
+        ? line.englishPhonetic
+        : null;
     final blank = text.trim().isEmpty;
     final duration = switch (line) {
       LrcLine value => value.length,
@@ -116,6 +121,8 @@ class LyricViewTile extends StatelessWidget {
               romanization,
             if (controller.showJapaneseReading && japaneseReading != null)
               japaneseReading,
+            if (controller.showEnglishPhonetics && englishPhonetic != null)
+              englishPhonetic,
             if (controller.showTimestamps && onTap != null)
               lyricReadingTimestamp(line.start),
             syncLine == null ? parts.first : text,
@@ -138,6 +145,8 @@ class LyricViewTile extends StatelessWidget {
                 line,
                 translation: controller.showTranslation,
                 romanization: controller.showRomanization,
+                japaneseReading: controller.showJapaneseReading,
+                englishPhonetic: controller.showEnglishPhonetics,
               ),
             ),
       },
@@ -468,11 +477,19 @@ class LyricViewTile extends StatelessWidget {
                                           line.japaneseReadingSpans,
                                       japaneseReadingTransitionIdentity:
                                           japaneseReadingTransitionIdentity,
+                                      englishPhoneticSource: sourceIdentity,
+                                      englishPhoneticSpans:
+                                          line.englishPhoneticSpans,
+                                      englishPhoneticTransitionIdentity:
+                                          englishPhoneticTransitionIdentity,
                                       timestamp: controller.showTimestamps,
                                       romanization: controller.showRomanization,
                                       japaneseReading: controller
                                               .showJapaneseReading &&
                                           line.japaneseReadingSpans.isNotEmpty,
+                                      englishPhonetic: controller
+                                              .showEnglishPhonetics &&
+                                          line.englishPhoneticSpans.isNotEmpty,
                                       translation: controller.showTranslation,
                                       reducedMotion: reducedMotion,
                                       onEnd: notifyReadingSettingEnd
@@ -503,17 +520,30 @@ class LyricViewTile extends StatelessWidget {
                                           line.japaneseReadingSpans,
                                       japaneseReadingTransitionIdentity:
                                           japaneseReadingTransitionIdentity,
+                                      englishPhoneticSource: sourceIdentity,
+                                      englishPhoneticSpans:
+                                          line.englishPhoneticSpans,
+                                      englishPhoneticTransitionIdentity:
+                                          englishPhoneticTransitionIdentity,
                                       timestamp: controller.showTimestamps,
                                       romanization: controller.showRomanization,
                                       japaneseReading: controller
                                               .showJapaneseReading &&
                                           line.japaneseReadingSpans.isNotEmpty,
+                                      englishPhonetic: controller
+                                              .showEnglishPhonetics &&
+                                          line.englishPhoneticSpans.isNotEmpty,
                                       translation: controller.showTranslation,
                                       reducedMotion: reducedMotion,
                                       onEnd: notifyReadingSettingEnd
                                           ? onContentRevealEnd
                                           : null,
-                                      builder: (context, visibility) => Column(
+                                      builder: (context, visibility) {
+                                        final combinedRubyVisibility = math.max(
+                                          visibility.japaneseReading,
+                                          visibility.englishPhonetic,
+                                        );
+                                        return Column(
                                         mainAxisSize: MainAxisSize.min,
                                         crossAxisAlignment:
                                             CrossAxisAlignment.stretch,
@@ -573,12 +603,11 @@ class LyricViewTile extends StatelessWidget {
                                               ) =>
                                                   aligned(
                                                 _LyricParagraphSurface(
-                                                  retainSourceBounds: visibility
-                                                              .japaneseReading >
-                                                          0 &&
-                                                      visibility
-                                                          .japaneseReadingSpans
-                                                          .isNotEmpty,
+                                                  retainSourceBounds:
+                                                      combinedRubyVisibility >
+                                                              0 &&
+                                                          visibility.rubySpans
+                                                              .isNotEmpty,
                                                   child: _TimedLyricText(
                                                     line: syncLine,
                                                     rubyRasterScale:
@@ -589,9 +618,15 @@ class LyricViewTile extends StatelessWidget {
                                                                 1.5
                                                             : null,
                                                     rubySpans: visibility
-                                                        .japaneseReadingSpans,
-                                                    rubyVisibility: visibility
-                                                        .japaneseReading,
+                                                        .rubySpans,
+                                                    rubyVisibility:
+                                                        combinedRubyVisibility,
+                                                    japaneseRubyVisibility:
+                                                        visibility
+                                                            .japaneseReading,
+                                                    phoneticRubyVisibility:
+                                                        visibility
+                                                            .englishPhonetic,
                                                     position: position,
                                                     active: isMainLine,
                                                     activation: activation,
@@ -642,12 +677,11 @@ class LyricViewTile extends StatelessWidget {
                                               ) =>
                                                   aligned(
                                                 _LyricParagraphSurface(
-                                                  retainSourceBounds: visibility
-                                                              .japaneseReading >
-                                                          0 &&
-                                                      visibility
-                                                          .japaneseReadingSpans
-                                                          .isNotEmpty,
+                                                  retainSourceBounds:
+                                                      combinedRubyVisibility >
+                                                              0 &&
+                                                          visibility.rubySpans
+                                                              .isNotEmpty,
                                                   child: BalancedLyricText(
                                                     parts.first,
                                                     rubyRasterScale:
@@ -666,14 +700,20 @@ class LyricViewTile extends StatelessWidget {
                                                         wrapTargetFontSize,
                                                     wrapProgress: wrapProgress,
                                                     wrapStatus: wrapStatus,
-                                                    rubySpans: visibility
-                                                                .japaneseReading >
-                                                            0
-                                                        ? visibility
-                                                            .japaneseReadingSpans
-                                                        : const [],
-                                                    rubyVisibility: visibility
-                                                        .japaneseReading,
+                                                    rubySpans:
+                                                        combinedRubyVisibility >
+                                                                0
+                                                            ? visibility
+                                                                .rubySpans
+                                                            : const [],
+                                                    rubyVisibility:
+                                                        combinedRubyVisibility,
+                                                    japaneseRubyVisibility:
+                                                        visibility
+                                                            .japaneseReading,
+                                                    phoneticRubyVisibility:
+                                                        visibility
+                                                            .englishPhonetic,
                                                     style: primaryStyle(
                                                       size,
                                                       spacing,
@@ -695,7 +735,8 @@ class LyricViewTile extends StatelessWidget {
                                               alignment: presentation.alignment,
                                             ),
                                         ],
-                                      ),
+                                      );
+                                      },
                                     ),
                             ),
                           );
@@ -797,6 +838,8 @@ class _TimedLyricText extends StatefulWidget {
   const _TimedLyricText({
     required this.line,
     this.rubyVisibility = 1,
+    this.japaneseRubyVisibility,
+    this.phoneticRubyVisibility,
     this.rubyRasterScale,
     this.rubySpans,
     required this.position,
@@ -813,6 +856,8 @@ class _TimedLyricText extends StatefulWidget {
 
   final SyncLyricLine line;
   final double rubyVisibility;
+  final double? japaneseRubyVisibility;
+  final double? phoneticRubyVisibility;
   final double? rubyRasterScale;
   final List<LyricRubySpan>? rubySpans;
   final ValueListenable<Duration> position;
@@ -1003,6 +1048,8 @@ class _TimedLyricTextState extends State<_TimedLyricText>
               playedColor: widget.playedColor,
               glowAllowed: widget.glowAllowed,
               rubyVisibility: widget.rubyVisibility,
+              japaneseRubyVisibility: widget.japaneseRubyVisibility,
+              phoneticRubyVisibility: widget.phoneticRubyVisibility,
               rubyRasterScale: widget.rubyRasterScale,
               follow: follow,
               alignmentX: widget.alignmentX,
@@ -1750,6 +1797,8 @@ class LyricWordHighlightPainter extends CustomPainter
     required this.glowAllowed,
     required this.inkOffset,
     this.rubyVisibility = 1,
+    this.japaneseRubyVisibility,
+    this.phoneticRubyVisibility,
     this.rubyRasterScale,
     this.follow,
     this.alignmentX,
@@ -1775,6 +1824,8 @@ class LyricWordHighlightPainter extends CustomPainter
   final double? alignmentX;
   final Offset inkOffset;
   final double rubyVisibility;
+  final double? japaneseRubyVisibility;
+  final double? phoneticRubyVisibility;
   final double? rubyRasterScale;
   @override
   TextPainter get glyphParagraph => _layout.base;
@@ -2088,10 +2139,19 @@ class LyricWordHighlightPainter extends CustomPainter
       ruby.paintPrimary(canvas, primary, visibility: rubyVisibility);
     }
     if (ruby != null) {
+      final perSpan = (japaneseRubyVisibility != null &&
+                  japaneseRubyVisibility != rubyVisibility) ||
+              (phoneticRubyVisibility != null &&
+                  phoneticRubyVisibility != rubyVisibility)
+          ? (LyricRubySpan span) => isLyricPhoneticSpan(span)
+              ? (phoneticRubyVisibility ?? rubyVisibility)
+              : (japaneseRubyVisibility ?? rubyVisibility)
+          : null;
       ruby.paint(
         canvas,
         tint: playedColor,
         visibility: rubyVisibility,
+        spanVisibility: perSpan,
         rasterScale: rubyRasterScale,
         displacement: (glyph) => _rubyDisplacement(glyph, poses),
       );
@@ -2527,6 +2587,8 @@ class LyricWordHighlightPainter extends CustomPainter
       alignmentX != oldDelegate.alignmentX ||
       inkOffset != oldDelegate.inkOffset ||
       rubyVisibility != oldDelegate.rubyVisibility ||
+      japaneseRubyVisibility != oldDelegate.japaneseRubyVisibility ||
+      phoneticRubyVisibility != oldDelegate.phoneticRubyVisibility ||
       rubyRasterScale != oldDelegate.rubyRasterScale;
 }
 

@@ -1,4 +1,6 @@
 import 'dart:math' as math;
+import 'package:dan_player/component/app_motion.dart';
+import 'package:desktop_lyric/component/text_pixel_snap.dart';
 import 'package:desktop_lyric/font_policy.dart';
 
 import 'package:dan_player/component/overflow_marquee_text.dart';
@@ -122,63 +124,180 @@ class NowPlayingMetadataHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        OverflowMarqueeText(title,
-            key: const ValueKey('now-playing-metadata-title'),
-            hidden: hidden,
-            style: _titleStyle.copyWith(color: color)),
+        _MetadataFieldTransition(
+          identity: title,
+          hidden: hidden,
+          child: OverflowMarqueeText(title,
+              key: const ValueKey('now-playing-metadata-title'),
+              hidden: hidden,
+              style: _titleStyle.copyWith(color: color)),
+        ),
         SizedBox(height: _headerSpacing(context, title).inside),
-        LayoutBuilder(builder: (context, constraints) {
-          final hasArtist = artist.trim().isNotEmpty;
-          final hasAlbum = album.trim().isNotEmpty;
-          final style = TextStyle(color: color.withValues(alpha: .88));
-          final artistText = hasArtist
-              ? _measureHeaderText(context, artist, style).width.ceilToDouble()
-              : 0.0;
-          final albumText = hasAlbum
-              ? _measureHeaderText(context, album, style).width.ceilToDouble()
-              : 0.0;
-          final naturalArtist = hasArtist ? artistText + _metadataChrome : 0.0;
-          final naturalAlbum = hasAlbum ? albumText + _metadataChrome : 0.0;
-          final maximum = constraints.maxWidth;
-          final divider =
-              hasArtist && hasAlbum && maximum >= 59 ? _metadataDivider : 0.0;
-          final available = math.max(0.0, maximum - divider);
-          var artistWidth = math.min(naturalArtist, available);
-          var albumWidth = math.min(naturalAlbum, available);
-          if (hasArtist &&
-              hasAlbum &&
-              naturalArtist + naturalAlbum > available) {
-            if (available < _metadataChrome * 2) {
-              artistWidth = albumWidth = available / 2;
-            } else {
-              final textBudget = available - _metadataChrome * 2;
-              final half = textBudget / 2;
-              final artistShare = artistText <= half
-                  ? artistText
-                  : albumText <= half
-                      ? textBudget - albumText
-                      : textBudget * artistText / (artistText + albumText);
-              artistWidth = _metadataChrome + artistShare;
-              albumWidth = available - artistWidth;
+        _MetadataFieldTransition(
+          identity: (artist, album),
+          hidden: hidden,
+          child: LayoutBuilder(builder: (context, constraints) {
+            final hasArtist = artist.trim().isNotEmpty;
+            final hasAlbum = album.trim().isNotEmpty;
+            final style = TextStyle(color: color.withValues(alpha: .88));
+            final artistText = hasArtist
+                ? _measureHeaderText(context, artist, style)
+                    .width
+                    .ceilToDouble()
+                : 0.0;
+            final albumText = hasAlbum
+                ? _measureHeaderText(context, album, style).width.ceilToDouble()
+                : 0.0;
+            final naturalArtist =
+                hasArtist ? artistText + _metadataChrome : 0.0;
+            final naturalAlbum = hasAlbum ? albumText + _metadataChrome : 0.0;
+            final maximum = constraints.maxWidth;
+            final divider =
+                hasArtist && hasAlbum && maximum >= 59 ? _metadataDivider : 0.0;
+            final available = math.max(0.0, maximum - divider);
+            var artistWidth = math.min(naturalArtist, available);
+            var albumWidth = math.min(naturalAlbum, available);
+            if (hasArtist &&
+                hasAlbum &&
+                naturalArtist + naturalAlbum > available) {
+              if (available < _metadataChrome * 2) {
+                artistWidth = albumWidth = available / 2;
+              } else {
+                final textBudget = available - _metadataChrome * 2;
+                final half = textBudget / 2;
+                final artistShare = artistText <= half
+                    ? artistText
+                    : albumText <= half
+                        ? textBudget - albumText
+                        : textBudget * artistText / (artistText + albumText);
+                artistWidth = _metadataChrome + artistShare;
+                albumWidth = available - artistWidth;
+              }
             }
-          }
-          return Row(children: [
-            if (hasArtist)
-              _metadata(context, artist, '歌手', Symbols.artist,
-                  width: artistWidth),
-            if (divider > 0)
-              SizedBox(
-                  width: divider,
-                  height: 12,
-                  child: VerticalDivider(
-                      width: 1,
-                      thickness: 1,
-                      color: color.withValues(alpha: .3))),
-            if (hasAlbum)
-              _metadata(context, album, '专辑', Symbols.album, width: albumWidth),
-          ]);
-        }),
+            return Row(children: [
+              if (hasArtist)
+                _metadata(context, artist, '歌手', Symbols.artist,
+                    width: artistWidth),
+              if (divider > 0)
+                SizedBox(
+                    width: divider,
+                    height: 12,
+                    child: VerticalDivider(
+                        width: 1,
+                        thickness: 1,
+                        color: color.withValues(alpha: .3))),
+              if (hasAlbum)
+                _metadata(context, album, '专辑', Symbols.album,
+                    width: albumWidth),
+            ]);
+          }),
+        ),
       ],
+    );
+  }
+}
+
+/// Smooth single-child entrance on metadata field change without duplicating
+/// child keys or running when hidden / reduced motion is active.
+class _MetadataFieldTransition extends StatefulWidget {
+  const _MetadataFieldTransition({
+    required this.identity,
+    required this.child,
+    this.hidden,
+  });
+
+  final Object identity;
+  final Widget child;
+  final ValueListenable<bool>? hidden;
+
+  @override
+  State<_MetadataFieldTransition> createState() =>
+      _MetadataFieldTransitionState();
+}
+
+class _MetadataFieldTransitionState extends State<_MetadataFieldTransition>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: AppMotion.emphasized,
+    value: 1,
+  );
+  late final Animation<double> _opacity = Tween<double>(
+    begin: .28,
+    end: 1.0,
+  ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
+
+  @override
+  void initState() {
+    super.initState();
+    widget.hidden?.addListener(_handleHidden);
+  }
+
+  void _handleHidden() {
+    if (widget.hidden?.value == true && _controller.isAnimating) {
+      _controller.stop();
+      _controller.value = 1;
+    }
+  }
+
+  bool _canAnimate(BuildContext context) {
+    if (widget.hidden?.value == true) return false;
+    if (!TickerMode.valuesOf(context).enabled) return false;
+    final features =
+        WidgetsBinding.instance.platformDispatcher.accessibilityFeatures;
+    if (features.disableAnimations || features.reduceMotion) return false;
+    return AppMotion.enabled(context, MotionKind.transitions);
+  }
+
+  @override
+  void didUpdateWidget(covariant _MetadataFieldTransition oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.hidden, widget.hidden)) {
+      oldWidget.hidden?.removeListener(_handleHidden);
+      widget.hidden?.addListener(_handleHidden);
+    }
+    if (oldWidget.identity != widget.identity) {
+      if (_canAnimate(context)) {
+        _controller.forward(from: 0);
+      } else {
+        _controller.stop();
+        _controller.value = 1;
+      }
+    } else if (!_canAnimate(context) && _controller.isAnimating) {
+      _controller.stop();
+      _controller.value = 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.hidden?.removeListener(_handleHidden);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    return FadeTransition(
+      opacity: _opacity,
+      alwaysIncludeSemantics: true,
+      child: AnimatedBuilder(
+        animation: _controller,
+        child: widget.child,
+        builder: (context, child) {
+          final offset = _controller.value >= 1
+              ? Offset.zero
+              : snapOffsetToPhysicalPixel(
+                  Offset(
+                    (1 - Curves.easeOutCubic.transform(_controller.value)) * 6,
+                    0,
+                  ),
+                  dpr,
+                );
+          return Transform.translate(offset: offset, child: child);
+        },
+      ),
     );
   }
 }

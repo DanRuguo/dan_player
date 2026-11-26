@@ -1,7 +1,10 @@
+import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/text_motion_stabilizer.dart';
 import 'package:flutter/material.dart';
 
-/// A compact playlist identity block: artwork belongs beside the title, not in
-/// the breadcrumb strip. All actions keep their normal touch/keyboard targets.
+/// A Material 3 Expressive playlist identity hero card: artwork belongs beside
+/// the title, below the breadcrumb strip, while all actions retain full touch
+/// and keyboard targets.
 class PlaylistHeader extends StatelessWidget {
   const PlaylistHeader({
     super.key,
@@ -22,15 +25,59 @@ class PlaylistHeader extends StatelessWidget {
   final Widget? details;
   final bool compact;
 
+  Widget _framedCard(BuildContext context, Widget child) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color:
+            scheme.surfaceContainerLow.withValues(alpha: isDark ? .60 : .78),
+        borderRadius: AppShape.cardRadius,
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: isDark ? .34 : .42),
+        ),
+      ),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+            compact ? 12 : 16, compact ? 8 : 10, compact ? 12 : 16, compact ? 10 : 14),
+        child: child,
+      ),
+    );
+  }
+
+  Widget _shadowedCover(BuildContext context, double size) {
+    final scheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: scheme.shadow.withValues(alpha: .16),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: SizedBox.square(
+        key: const ValueKey('playlist-header-cover'),
+        dimension: size,
+        child: coverBuilder(size),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
         builder: (context, constraints) {
-          if (compact) return _compact(context, constraints.maxWidth);
-          final wide = constraints.maxWidth >= 640 &&
+          final innerWidth = (constraints.maxWidth - (compact ? 24 : 32))
+              .clamp(0.0, double.infinity);
+          if (compact) return _framedCard(context, _compact(context, innerWidth));
+          final scheme = Theme.of(context).colorScheme;
+          final wide = innerWidth >= 608 &&
               MediaQuery.textScalerOf(context).scale(14) < 23;
           final coverSize = wide
               ? 112.0
-              : constraints.maxWidth >= 360
+              : innerWidth >= 336
                   ? 88.0
                   : 72.0;
           final text = Column(
@@ -46,8 +93,9 @@ class PlaylistHeader extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(context).colorScheme.onSurface,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.3,
+                          color: scheme.onSurface,
                         ),
                   ),
                 ),
@@ -61,7 +109,10 @@ class PlaylistHeader extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        color: scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w500,
+                        fontFeatures: tabularFiguresFeatures,
+                      ),
                 ),
               ),
               if (details != null) ...[
@@ -76,31 +127,30 @@ class PlaylistHeader extends StatelessWidget {
               ],
             ],
           );
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              breadcrumbs,
-              const SizedBox(height: 6),
-              Row(
-                key: const ValueKey('playlist-header-identity'),
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  SizedBox.square(
-                    key: const ValueKey('playlist-header-cover'),
-                    dimension: coverSize,
-                    child: coverBuilder(coverSize),
-                  ),
-                  SizedBox(width: wide ? 20 : 16),
-                  Expanded(child: text),
+          return _framedCard(
+            context,
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                breadcrumbs,
+                const SizedBox(height: 8),
+                Row(
+                  key: const ValueKey('playlist-header-identity'),
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    _shadowedCover(context, coverSize),
+                    SizedBox(width: wide ? 20 : 16),
+                    Expanded(child: text),
+                  ],
+                ),
+                if (!wide) ...[
+                  const SizedBox(height: 12),
+                  Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: actions),
                 ],
-              ),
-              if (!wide) ...[
-                const SizedBox(height: 12),
-                Align(
-                    alignment: AlignmentDirectional.centerStart,
-                    child: actions),
               ],
-            ],
+            ),
           );
         },
       );
@@ -108,18 +158,15 @@ class PlaylistHeader extends StatelessWidget {
   Widget _compact(BuildContext context, double width) {
     final scheme = Theme.of(context).colorScheme;
     final inlineActions =
-        width >= 880 && MediaQuery.textScalerOf(context).scale(14) < 23;
+        width >= 848 && MediaQuery.textScalerOf(context).scale(14) < 23;
     return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
           breadcrumbs,
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Row(key: const ValueKey('playlist-header-identity'), children: [
-            SizedBox.square(
-                key: const ValueKey('playlist-header-cover'),
-                dimension: 64,
-                child: coverBuilder(64)),
+            _shadowedCover(context, 64),
             const SizedBox(width: 12),
             Expanded(
                 child: Column(
@@ -139,8 +186,8 @@ class PlaylistHeader extends StatelessWidget {
                                   .titleLarge
                                   ?.copyWith(
                                       color: scheme.onSurface,
-                                      fontWeight: FontWeight.w600)))),
-                  const SizedBox(height: 4),
+                                      fontWeight: FontWeight.w700)))),
+                  const SizedBox(height: 3),
                   Tooltip(
                       message: subtitle,
                       child: Text(subtitle,
@@ -150,7 +197,9 @@ class PlaylistHeader extends StatelessWidget {
                           style: Theme.of(context)
                               .textTheme
                               .bodySmall
-                              ?.copyWith(color: scheme.onSurfaceVariant))),
+                              ?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                  fontFeatures: tabularFiguresFeatures))),
                   if (details != null) ...[
                     const SizedBox(height: 4),
                     details!,
@@ -161,7 +210,7 @@ class PlaylistHeader extends StatelessWidget {
               ConstrainedBox(
                   // Reserve a useful identity width without permanently
                   // assigning half the header to empty title space.
-                  constraints: BoxConstraints(maxWidth: width - 280),
+                  constraints: BoxConstraints(maxWidth: width - 256),
                   child: actions),
             ],
           ]),

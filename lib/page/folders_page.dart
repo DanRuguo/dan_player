@@ -23,6 +23,7 @@ import 'package:dan_player/page/uni_page_components.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:flutter/material.dart';
 import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/text_motion_stabilizer.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:path/path.dart' as path;
 
@@ -258,6 +259,7 @@ class _FoldersPageState extends State<FoldersPage> {
               ]);
               final actions = <Widget>[
                 _FolderSortControl(
+                    icon: Symbols.folder,
                     label: ui('文件夹排序'),
                     child: SortMethodComboBox<AudioFolder>(
                         contentList: _allFolders,
@@ -272,6 +274,7 @@ class _FoldersPageState extends State<FoldersPage> {
                             setState(() => folderPref.sortOrder = order),
                         scopeId: 'folder-tree-folders')),
                 _FolderSortControl(
+                    icon: Symbols.music_note,
                     label: ui('歌曲排序'),
                     child: SortMethodComboBox<Audio>(
                         contentList: _allSongs,
@@ -285,13 +288,17 @@ class _FoldersPageState extends State<FoldersPage> {
                             setState(() => songPref.sortOrder = order),
                         scopeId: 'folder-tree-songs')),
               ];
+              final totalFolderSongs = _allSongs.length;
               return SelectionPageLifecycle(
                   onLeave: _selection.exitMultiSelect,
                   child: ListenableBuilder(
                       listenable: _selection,
                       builder: (context, _) => PageScaffold(
                             title: ui("文件夹"),
-                            subtitle: ui("{0} 个文件夹", [tree.byId.length]),
+                            subtitle: [
+                              ui("{0} 个文件夹", [tree.byId.length]),
+                              ui("{0} 首乐曲", [totalFolderSongs]),
+                            ].join(' · '),
                             actions: const [],
                             responsiveActions: _selection.enableMultiSelectView
                                 ? AudioMultiSelectionActions(
@@ -372,15 +379,37 @@ class _FoldersPageState extends State<FoldersPage> {
 }
 
 class _FolderSortControl extends StatelessWidget {
-  const _FolderSortControl({required this.label, required this.child});
+  const _FolderSortControl(
+      {required this.icon, required this.label, required this.child});
+  final IconData icon;
   final String label;
   final Widget child;
   @override
-  Widget build(BuildContext context) => Wrap(
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Wrap(
       spacing: 8,
       runSpacing: 4,
       crossAxisAlignment: WrapCrossAlignment.center,
-      children: [Text(label), child]);
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: scheme.primary),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ],
+        ),
+        child,
+      ],
+    );
+  }
 }
 
 extension on List<Audio> {
@@ -449,23 +478,31 @@ class AudioFolderTile extends StatelessWidget {
                           folderDisplayName(audioFolder.path),
                       folderPath: normalized,
                       summary: '${ui('音乐文件夹')} · $summary',
-                      textInset: 140,
+                      textInset: onToggle == null ? 140 : 168,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 4),
                         child: Material(
-                          color: scheme.surfaceContainerLow,
+                          color: expanded && treeRow
+                              ? Color.alphaBlend(
+                                  scheme.primaryContainer
+                                      .withValues(alpha: .22),
+                                  scheme.surfaceContainerLow,
+                                )
+                              : scheme.surfaceContainerLow,
                           shape: RoundedRectangleBorder(
-                              borderRadius: AppShape.controlRadius,
+                              borderRadius: AppShape.surfaceRadius,
                               side: BorderSide(
-                                  color: scheme.outlineVariant
-                                      .withValues(alpha: .6))),
+                                  color: expanded && treeRow
+                                      ? scheme.primary.withValues(alpha: .32)
+                                      : scheme.outlineVariant
+                                          .withValues(alpha: .42))),
                           child: InkWell(
                             key: ValueKey('folder-open-${audioFolder.path}'),
-                            borderRadius: AppShape.controlRadius,
+                            borderRadius: AppShape.surfaceRadius,
                             onTap: onToggle ?? (treeRow ? null : menu.open),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 8),
+                                  horizontal: 14, vertical: 9),
                               child: Row(children: [
                                 Container(
                                     key: ValueKey(
@@ -473,11 +510,20 @@ class AudioFolderTile extends StatelessWidget {
                                     width: 48,
                                     height: 48,
                                     decoration: BoxDecoration(
-                                        color: scheme.primaryContainer,
-                                        borderRadius: AppShape.smallRadius),
-                                    child: Icon(Symbols.folder_open,
-                                        color: scheme.onPrimaryContainer)),
-                                const SizedBox(width: 12),
+                                        color: expanded && treeRow
+                                            ? scheme.primaryContainer
+                                            : scheme.secondaryContainer
+                                                .withValues(alpha: .72),
+                                        borderRadius:
+                                            BorderRadius.circular(12)),
+                                    child: Icon(
+                                        expanded || !treeRow
+                                            ? Symbols.folder_open
+                                            : Symbols.folder,
+                                        color: expanded && treeRow
+                                            ? scheme.onPrimaryContainer
+                                            : scheme.onSecondaryContainer)),
+                                const SizedBox(width: 14),
                                 Expanded(
                                     child: Column(
                                         mainAxisSize: MainAxisSize.min,
@@ -494,26 +540,45 @@ class AudioFolderTile extends StatelessWidget {
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
-                                              fontSize: 16,
+                                              fontSize: 15.5,
                                               height: 1.25,
                                               fontWeight: FontWeight.w600,
                                               color: scheme.onSurface)),
+                                      const SizedBox(height: 1),
                                       Text(normalized,
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
-                                              fontSize: 14,
+                                              fontSize: 13.5,
                                               height: 1.25,
                                               color: scheme.onSurfaceVariant)),
+                                      const SizedBox(height: 1),
                                       Text('${ui('音乐文件夹')} · $summary',
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
-                                              fontSize: 14,
+                                              fontSize: 13,
                                               height: 1.25,
-                                              color: scheme.primary)),
+                                              fontWeight: FontWeight.w500,
+                                              color: scheme.primary,
+                                              fontFeatures:
+                                                  tabularFiguresFeatures)),
                                     ])),
-                                const SizedBox(width: 8),
+                                if (treeRow && onToggle != null) ...[
+                                  const SizedBox(width: 6),
+                                  AnimatedRotation(
+                                    turns: expanded ? .25 : 0,
+                                    duration: const Duration(milliseconds: 160),
+                                    child: Icon(
+                                      Symbols.chevron_right,
+                                      size: 20,
+                                      color: expanded
+                                          ? scheme.primary
+                                          : scheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(width: 6),
                                 Builder(
                                     builder: (actionContext) => IconButton(
                                         tooltip: ui('更多'),
@@ -559,26 +624,28 @@ class PlayerDataFolderTile extends StatelessWidget {
                     child: Material(
                         color: scheme.surfaceContainerLow,
                         shape: RoundedRectangleBorder(
-                            borderRadius: AppShape.controlRadius,
+                            borderRadius: AppShape.surfaceRadius,
                             side: BorderSide(
                                 color: scheme.outlineVariant
-                                    .withValues(alpha: .6))),
+                                    .withValues(alpha: .42))),
                         child: InkWell(
-                            borderRadius: AppShape.controlRadius,
+                            borderRadius: AppShape.surfaceRadius,
                             onTap: menu.open,
                             child: Padding(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 8),
+                                    horizontal: 14, vertical: 9),
                                 child: Row(children: [
                                   Container(
                                       width: 48,
                                       height: 48,
                                       decoration: BoxDecoration(
-                                          color: scheme.primaryContainer,
-                                          borderRadius: AppShape.smallRadius),
+                                          color: scheme.tertiaryContainer
+                                              .withValues(alpha: .72),
+                                          borderRadius:
+                                              BorderRadius.circular(12)),
                                       child: Icon(Symbols.database,
-                                          color: scheme.onPrimaryContainer)),
-                                  const SizedBox(width: 12),
+                                          color: scheme.onTertiaryContainer)),
+                                  const SizedBox(width: 14),
                                   Expanded(
                                       child: Column(
                                           mainAxisSize: MainAxisSize.min,
@@ -595,24 +662,27 @@ class PlayerDataFolderTile extends StatelessWidget {
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                             style: TextStyle(
-                                                fontSize: 16,
+                                                fontSize: 15.5,
                                                 height: 1.25,
                                                 fontWeight: FontWeight.w600,
                                                 color: scheme.onSurface)),
+                                        const SizedBox(height: 1),
                                         Text(directory.path,
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                             style: TextStyle(
-                                                fontSize: 14,
+                                                fontSize: 13.5,
                                                 height: 1.25,
                                                 color:
                                                     scheme.onSurfaceVariant)),
+                                        const SizedBox(height: 1),
                                         Text(ui('缓存文件夹'),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                             style: TextStyle(
-                                                fontSize: 14,
+                                                fontSize: 13,
                                                 height: 1.25,
+                                                fontWeight: FontWeight.w500,
                                                 color: scheme.primary)),
                                       ])),
                                   Builder(
@@ -620,8 +690,10 @@ class PlayerDataFolderTile extends StatelessWidget {
                                           tooltip: ui('更多'),
                                           onPressed: () => toggleMenuAtAction(
                                               menu, context, actionContext),
-                                          icon:
-                                              const Icon(Symbols.more_horiz))),
+                                          icon: Icon(Symbols.more_horiz,
+                                              size: 20,
+                                              color:
+                                                  scheme.onSurfaceVariant))),
                                 ]))))))));
   }
 }

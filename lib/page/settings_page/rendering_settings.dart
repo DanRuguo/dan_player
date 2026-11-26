@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_segmented_control.dart';
@@ -161,115 +163,254 @@ class RenderingSettings extends StatelessWidget {
                     _update((current) => current.copyWith(lyricSpectrum: v))),
             Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+                child: LayoutBuilder(builder: (context, constraints) {
+                  final labelStyle = Theme.of(context)
+                      .textTheme
+                      .labelMedium
+                      ?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      );
+                  Widget labeledGroup(String caption, Widget control,
+                          {bool stretch = false}) =>
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: stretch
+                            ? CrossAxisAlignment.stretch
+                            : CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(left: 4, bottom: 6),
+                            child: Text(caption, style: labelStyle),
+                          ),
+                          control,
+                        ],
+                      );
+                  final measureStyle = DefaultTextStyle.of(context)
+                      .style
+                      .merge(Theme.of(context).textTheme.labelLarge)
+                      .copyWith(fontWeight: FontWeight.w700);
+                  final painter = TextPainter(
+                    textDirection: Directionality.of(context),
+                    textScaler: MediaQuery.textScalerOf(context),
+                    maxLines: 1,
+                  );
+                  double measureGroup(
+                      String caption, List<String> optionLabels) {
+                    var sum = (optionLabels.length - 1) * 2.0 + 8.0;
+                    for (final label in optionLabels) {
+                      painter.text = TextSpan(text: label, style: measureStyle);
+                      painter.layout();
+                      sum += math.max(44.0, painter.width.ceilToDouble() + 60.0);
+                    }
+                    painter.text = TextSpan(text: caption, style: labelStyle);
+                    painter.layout();
+                    return math.max(sum, painter.width.ceilToDouble() + 8.0);
+                  }
+
+                  final placementLabels = [ui('播放条上方'), ui('封面四周')];
+                  final styleLabels = [ui('圆头音柱'), ui('像素音柱')];
+                  final densityLabels = [
+                    for (final density in SpectrumDensity.values)
+                      ui(switch (density) {
+                        SpectrumDensity.low => '低',
+                        SpectrumDensity.medium => '中',
+                        SpectrumDensity.high => '高'
+                      })
+                  ];
+                  final placementCaption = ui('频谱显示位置');
+                  final styleCaption = ui('频谱样式');
+                  final densityCaption = ui('频谱音柱数量');
+                  final placementNeed =
+                      measureGroup(placementCaption, placementLabels);
+                  final styleNeed = measureGroup(styleCaption, styleLabels);
+                  final densityNeed =
+                      measureGroup(densityCaption, densityLabels);
+                  painter.dispose();
+
+                  final placementControl =
                       AppSegmentedControl<LyricSpectrumPlacement>(
-                        key: const ValueKey('lyric-spectrum-placement'),
-                        semanticLabel: ui('频谱显示位置'),
-                        value: value.lyricSpectrumPlacement,
-                        onChanged: value.lyricSpectrum
-                            ? (placement) => _update((current) => current
-                                .copyWith(lyricSpectrumPlacement: placement))
-                            : null,
-                        options: [
-                          AppSegmentOption(
-                            value: LyricSpectrumPlacement.progress,
-                            label: ui('播放条上方'),
-                            icon: Icons.align_vertical_bottom,
-                          ),
-                          AppSegmentOption(
-                            value: LyricSpectrumPlacement.cover,
-                            label: ui('封面四周'),
-                            icon: Icons.surround_sound_outlined,
-                          ),
-                        ],
+                    key: const ValueKey('lyric-spectrum-placement'),
+                    semanticLabel: placementCaption,
+                    value: value.lyricSpectrumPlacement,
+                    onChanged: value.lyricSpectrum
+                        ? (placement) => _update((current) => current.copyWith(
+                            lyricSpectrumPlacement: placement))
+                        : null,
+                    options: [
+                      AppSegmentOption(
+                        value: LyricSpectrumPlacement.progress,
+                        label: placementLabels[0],
+                        icon: Icons.align_vertical_bottom,
                       ),
-                      const SizedBox(height: 12),
-                      AppSegmentedControl<SpectrumStyle>(
-                        key: const ValueKey('spectrum-style'),
-                        semanticLabel: ui('频谱样式'),
-                        wrapCompactLabel: true,
-                        value: value.spectrumStyle,
-                        onChanged: value.lyricSpectrum
-                            ? (style) => _update((current) =>
-                                current.copyWith(spectrumStyle: style))
-                            : null,
-                        options: [
-                          AppSegmentOption(
-                            value: SpectrumStyle.rounded,
-                            label: ui('圆头音柱'),
-                            icon: Icons.equalizer,
-                          ),
-                          AppSegmentOption(
-                            value: SpectrumStyle.pixel,
-                            label: ui('像素音柱'),
-                            icon: Icons.grid_view,
-                          ),
-                        ],
+                      AppSegmentOption(
+                        value: LyricSpectrumPlacement.cover,
+                        label: placementLabels[1],
+                        icon: Icons.surround_sound_outlined,
                       ),
-                      const SizedBox(height: 8),
-                      Text(ui('样式同时用于播放条上方与封面四周。'),
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant)),
-                      const SizedBox(height: 12),
-                      AppSegmentedControl<SpectrumDensity>(
-                        key: const ValueKey('spectrum-density'),
-                        semanticLabel: ui('频谱音柱数量'),
-                        value: value.spectrumDensity,
-                        onChanged: value.lyricSpectrum
-                            ? (density) => _update((current) =>
-                                current.copyWith(spectrumDensity: density))
-                            : null,
-                        options: [
-                          for (final density in SpectrumDensity.values)
-                            AppSegmentOption(
-                              value: density,
-                              label: ui(switch (density) {
-                                SpectrumDensity.low => '低',
-                                SpectrumDensity.medium => '中',
-                                SpectrumDensity.high => '高'
-                              }),
-                              icon: switch (density) {
-                                SpectrumDensity.low =>
-                                  Icons.signal_cellular_alt_1_bar,
-                                SpectrumDensity.medium =>
-                                  Icons.signal_cellular_alt_2_bar,
-                                SpectrumDensity.high =>
-                                  Icons.signal_cellular_alt
-                              },
-                            ),
-                        ],
+                    ],
+                  );
+                  final styleControl = AppSegmentedControl<SpectrumStyle>(
+                    key: const ValueKey('spectrum-style'),
+                    semanticLabel: styleCaption,
+                    wrapCompactLabel: true,
+                    value: value.spectrumStyle,
+                    onChanged: value.lyricSpectrum
+                        ? (style) => _update(
+                            (current) => current.copyWith(spectrumStyle: style))
+                        : null,
+                    options: [
+                      AppSegmentOption(
+                        value: SpectrumStyle.rounded,
+                        label: styleLabels[0],
+                        icon: Icons.equalizer,
                       ),
-                      const SizedBox(height: 8),
-                      Text(ui('低／中／高档最多显示 36／72／112 根音柱，实际数量随可用空间调整。档位越高通常越耗 CPU；降低档位时音柱变宽。'),
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant)),
-                      if (value.lyricSpectrumPlacement ==
-                          LyricSpectrumPlacement.cover) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          ui('四周音柱会根据封面留白调整高度；窄窗口未显示封面时，改在播放条上方显示。'),
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant),
+                      AppSegmentOption(
+                        value: SpectrumStyle.pixel,
+                        label: styleLabels[1],
+                        icon: Icons.grid_view,
+                      ),
+                    ],
+                  );
+                  final densityControl = AppSegmentedControl<SpectrumDensity>(
+                    key: const ValueKey('spectrum-density'),
+                    semanticLabel: densityCaption,
+                    value: value.spectrumDensity,
+                    onChanged: value.lyricSpectrum
+                        ? (density) => _update((current) =>
+                            current.copyWith(spectrumDensity: density))
+                        : null,
+                    options: [
+                      for (var i = 0; i < SpectrumDensity.values.length; i++)
+                        AppSegmentOption(
+                          value: SpectrumDensity.values[i],
+                          label: densityLabels[i],
+                          icon: switch (SpectrumDensity.values[i]) {
+                            SpectrumDensity.low =>
+                              Icons.signal_cellular_alt_1_bar,
+                            SpectrumDensity.medium =>
+                              Icons.signal_cellular_alt_2_bar,
+                            SpectrumDensity.high => Icons.signal_cellular_alt
+                          },
                         ),
-                      ],
-                    ])),
+                    ],
+                  );
+                  final threeColumns = placementNeed +
+                          styleNeed +
+                          densityNeed +
+                          24.0 <=
+                      constraints.maxWidth;
+                  final twoPlusOne = !threeColumns &&
+                      placementNeed + styleNeed + 12.0 <= constraints.maxWidth;
+                  return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (threeColumns)
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                flex: math.max(1, placementNeed.round()),
+                                child: labeledGroup(
+                                  placementCaption,
+                                  placementControl,
+                                  stretch: true,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                flex: math.max(1, styleNeed.round()),
+                                child: labeledGroup(
+                                  styleCaption,
+                                  styleControl,
+                                  stretch: true,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                flex: math.max(1, densityNeed.round()),
+                                child: labeledGroup(
+                                  densityCaption,
+                                  densityControl,
+                                  stretch: true,
+                                ),
+                              ),
+                            ],
+                          )
+                        else if (twoPlusOne) ...[
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                flex: math.max(1, placementNeed.round()),
+                                child: labeledGroup(
+                                  placementCaption,
+                                  placementControl,
+                                  stretch: true,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                flex: math.max(1, styleNeed.round()),
+                                child: labeledGroup(
+                                  styleCaption,
+                                  styleControl,
+                                  stretch: true,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          labeledGroup(
+                            densityCaption,
+                            densityControl,
+                            stretch: true,
+                          ),
+                        ] else ...[
+                          labeledGroup(
+                            placementCaption,
+                            placementControl,
+                            stretch: true,
+                          ),
+                          const SizedBox(height: 10),
+                          labeledGroup(
+                            styleCaption,
+                            styleControl,
+                            stretch: true,
+                          ),
+                          const SizedBox(height: 10),
+                          labeledGroup(
+                            densityCaption,
+                            densityControl,
+                            stretch: true,
+                          ),
+                        ],
+                        const SizedBox(height: 10),
+                        Text(
+                            '${ui('样式同时用于播放条上方与封面四周。')} ${ui('低／中／高档最多显示 36／72／112 根音柱，实际数量随可用空间调整。档位越高通常越耗 CPU；降低档位时音柱变宽。')}',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant)),
+                        if (value.lyricSpectrumPlacement ==
+                            LyricSpectrumPlacement.cover) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            ui('四周音柱会根据封面留白调整高度；窄窗口未显示封面时，改在播放条上方显示。'),
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant),
+                          ),
+                        ],
+                      ]);
+                })),
             const Divider(height: 1),
             SettingsSwitchTile(
               surface: false,
@@ -331,14 +472,53 @@ class _FrameRateSettings extends StatelessWidget {
         void changeFps(int fps) => update((current) => current.copyWith(
             frameRate:
                 FrameRatePreference(mode: FrameRateMode.fixed, fps: fps)));
+        final scheme = Theme.of(context).colorScheme;
+        final ceilingBadge = DecoratedBox(
+          decoration: BoxDecoration(
+            color: scheme.secondaryContainer.withValues(alpha: .65),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: Text(
+              ui('当前窗口上限：{0} FPS',
+                  [hz.toStringAsFixed(hz == hz.roundToDouble() ? 0 : 2)]),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: scheme.onSecondaryContainer,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ),
+        );
         return SettingsSurface(
             child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SettingsHeader(
-                icon: Icons.speed,
-                title: ui('界面刷新率'),
-                subtitle: ui('只控制界面绘制，不改变屏幕设置或音频播放速度。')),
+            LayoutBuilder(builder: (context, constraints) {
+              final header = SettingsHeader(
+                  icon: Icons.speed,
+                  title: ui('界面刷新率'),
+                  subtitle: ui('只控制界面绘制，不改变屏幕设置或音频播放速度。'));
+              final scale = MediaQuery.textScalerOf(context).scale(1);
+              if (constraints.maxWidth >= 480 * scale) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: header),
+                    const SizedBox(width: 12),
+                    ceilingBadge,
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  header,
+                  const SizedBox(height: 8),
+                  ceilingBadge,
+                ],
+              );
+            }),
             const SizedBox(height: 12),
             AppSegmentedControl<FrameRateMode>(
               key: const ValueKey('frame-rate-mode'),
@@ -363,11 +543,8 @@ class _FrameRateSettings extends StatelessWidget {
                   ),
               ],
             ),
-            const SizedBox(height: 12),
-            Text(ui('当前窗口上限：{0} FPS',
-                [hz.toStringAsFixed(hz == hz.roundToDouble() ? 0 : 2)])),
             if (preference.mode == FrameRateMode.fixed) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               if (choices.length > 1)
                 AppSegmentedControl<int>(
                   key: const ValueKey('frame-rate-fps'),
@@ -385,7 +562,7 @@ class _FrameRateSettings extends StatelessWidget {
               else
                 Text('${choices.single} FPS'),
             ],
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Text(
                 ui(switch (preference.mode) {
                   FrameRateMode.display => '有画面变化时跟随屏幕刷新，静止时不持续绘制。',
@@ -393,7 +570,7 @@ class _FrameRateSettings extends StatelessWidget {
                     '交互时跟随屏幕，交互结束后动画最高 48 FPS；静止时不持续绘制。',
                   FrameRateMode.fixed => '动画按所选目标刷新；跨屏时自动受所在屏幕限制。实际帧率也取决于系统负载。',
                 }),
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant)),
           ],
         ));

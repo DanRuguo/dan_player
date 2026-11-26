@@ -8,6 +8,7 @@
 #include "desktop_integration.h"
 #include "installer_launcher.h"
 #include "japanese_phonetic_controller.h"
+#include "touch_sound_controller.h"
 #include "window_backdrop.h"
 #include "window_resize_policy.h"
 #include "window_resize_bridge.h"
@@ -96,6 +97,8 @@ bool FlutterWindow::OnCreate() {
       GetHandle(), flutter_controller_->engine());
   japanese_phonetic_ = std::make_unique<JapanesePhoneticController>(
       GetHandle(), flutter_controller_->engine());
+  touch_sound_ =
+      std::make_unique<TouchSoundController>(flutter_controller_->engine());
 
   // Dart applies restored bounds, resize policy and the backdrop before it
   // explicitly shows the HWND. Showing here on the first Flutter frame races
@@ -108,6 +111,7 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   window_teardown::HideBeforeResources(GetHandle());
+  touch_sound_.reset();
   japanese_phonetic_.reset();
   windows_shell_.reset();
   installer_launcher_.reset();

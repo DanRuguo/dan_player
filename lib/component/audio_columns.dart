@@ -128,28 +128,53 @@ class AudioColumnsHeader extends StatelessWidget {
     UiLanguageScope.watch(context);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
     return AppEntrance(
       identity: 'audio-columns-header',
       child: Semantics(
           header: true,
           child: Container(
             key: const ValueKey('audio-columns-header'),
-            margin: const EdgeInsets.only(top: 4, bottom: 8),
-            padding: EdgeInsets.fromLTRB(8, 10, reorder ? 52 : 8, 10),
+            margin: const EdgeInsets.only(top: 2, bottom: 8),
+            padding: EdgeInsets.fromLTRB(8, 8, reorder ? 52 : 8, 8),
             decoration: BoxDecoration(
-                color: scheme.primaryContainer.withValues(alpha: .24),
-                borderRadius: BorderRadius.circular(14),
-                border:
-                    Border.all(color: scheme.primary.withValues(alpha: .12))),
+              color: Color.alphaBlend(
+                scheme.primaryContainer.withValues(alpha: isDark ? .18 : .26),
+                scheme.surfaceContainerLow,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: scheme.outlineVariant
+                    .withValues(alpha: isDark ? .34 : .42),
+              ),
+            ),
             child: Row(children: [
               SizedBox(
-                  width: 64,
-                  child: Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: SizedBox(
-                          width: 48,
-                          child: Icon(Icons.library_music_outlined,
-                              size: 19, color: scheme.primary)))),
+                width: 64,
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: SizedBox(
+                    width: 48,
+                    child: Center(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: scheme.primaryContainer
+                              .withValues(alpha: isDark ? .55 : .78),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(5),
+                          child: Icon(
+                            Icons.library_music_outlined,
+                            size: 17,
+                            color: scheme.onPrimaryContainer,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
               Expanded(
                   child: AudioColumnFields(
                       title: ui("歌名"),
@@ -157,7 +182,7 @@ class AudioColumnsHeader extends StatelessWidget {
                       album: ui("专辑"),
                       heading: true,
                       titleColor: scheme.primary,
-                      metadataColor: scheme.primary)),
+                      metadataColor: scheme.onSurfaceVariant)),
               const SizedBox(width: 8),
               SizedBox(
                   width: 64,
@@ -166,7 +191,7 @@ class AudioColumnsHeader extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelLarge!.copyWith(
-                          color: scheme.primary,
+                          color: scheme.onSurfaceVariant,
                           fontSize: 13,
                           fontWeight: FontWeight.w600))),
               const SizedBox(width: 52),

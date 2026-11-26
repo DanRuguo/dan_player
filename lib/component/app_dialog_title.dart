@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 /// Centers only a dialog's heading; form/list alignment remains independent.
 /// Optional actions occupy balanced slots so a close button or switch does not
-/// pull the title away from the dialog center. No fixed text height or color.
+/// pull the title away from the dialog center.
 class AppDialogTitle extends StatelessWidget {
   const AppDialogTitle(
     this.title, {
@@ -27,17 +27,28 @@ class AppDialogTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final text = Text(title,
-        textAlign: TextAlign.center,
-        style: style,
-        maxLines: maxLines,
-        overflow: overflow);
+    final effectiveStyle = style ??
+        Theme.of(context).textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.2,
+            );
+    final text = Text(
+      title,
+      textAlign: TextAlign.center,
+      style: effectiveStyle,
+      maxLines: maxLines,
+      overflow: overflow,
+    );
     final content = subtitle == null
         ? text
         : Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
-            children: [text, subtitle!],
+            children: [
+              text,
+              const SizedBox(height: 4),
+              subtitle!,
+            ],
           );
     if (leading == null && trailing == null) {
       return Align(alignment: Alignment.center, child: content);

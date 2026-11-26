@@ -223,6 +223,8 @@ class BalancedLyricText extends StatefulWidget {
       this.wrapProgress = 0,
       this.wrapStatus,
       this.rubyVisibility = 1,
+      this.japaneseRubyVisibility,
+      this.phoneticRubyVisibility,
       this.rubyRasterScale,
       this.rubySpans = const []});
   final String text;
@@ -235,6 +237,8 @@ class BalancedLyricText extends StatefulWidget {
   final LyricWrapFlightStatus? wrapStatus;
   final List<LyricRubySpan> rubySpans;
   final double rubyVisibility;
+  final double? japaneseRubyVisibility;
+  final double? phoneticRubyVisibility;
   final double? rubyRasterScale;
 
   @override
@@ -595,6 +599,8 @@ class _BalancedLyricTextState extends State<BalancedLyricText>
                         lyricVerticalInkGuard +
                             (_ruby?.insetAt(widget.rubyVisibility) ?? 0)),
                     rubyVisibility: widget.rubyVisibility,
+                    japaneseRubyVisibility: widget.japaneseRubyVisibility,
+                    phoneticRubyVisibility: widget.phoneticRubyVisibility,
                     rubyRasterScale: widget.rubyRasterScale,
                     pixelRatio: MediaQuery.devicePixelRatioOf(context),
                     ruby: _ruby,
@@ -644,6 +650,8 @@ class PlainLyricWordFollowPainter extends CustomPainter
       this.wrapFlight,
       this.ruby,
       this.rubyVisibility = 1,
+      this.japaneseRubyVisibility,
+      this.phoneticRubyVisibility,
       this.rubyRasterScale,
       this.pixelRatio = 1,
       this.layoutIdentity})
@@ -659,6 +667,8 @@ class PlainLyricWordFollowPainter extends CustomPainter
   final Object? layoutIdentity;
   final LyricRubyLayout? ruby;
   final double rubyVisibility, pixelRatio;
+  final double? japaneseRubyVisibility;
+  final double? phoneticRubyVisibility;
   final double? rubyRasterScale;
   @override
   TextPainter get glyphParagraph => text;
@@ -702,9 +712,18 @@ class PlainLyricWordFollowPainter extends CustomPainter
       _paintInk(canvas);
       canvas.restore();
     }
+    final perSpan = (japaneseRubyVisibility != null &&
+                japaneseRubyVisibility != rubyVisibility) ||
+            (phoneticRubyVisibility != null &&
+                phoneticRubyVisibility != rubyVisibility)
+        ? (LyricRubySpan span) => isLyricPhoneticSpan(span)
+            ? (phoneticRubyVisibility ?? rubyVisibility)
+            : (japaneseRubyVisibility ?? rubyVisibility)
+        : null;
     ruby?.paint(canvas,
         tint: color,
         visibility: rubyVisibility,
+        spanVisibility: perSpan,
         rasterScale: rubyRasterScale, displacement: (glyph) {
       final morph = glyphMorph;
       final bounds = morph?.geometry
@@ -793,6 +812,8 @@ class PlainLyricWordFollowPainter extends CustomPainter
       alignmentX != oldDelegate.alignmentX ||
       wrapFlight != oldDelegate.wrapFlight ||
       rubyVisibility != oldDelegate.rubyVisibility ||
+      japaneseRubyVisibility != oldDelegate.japaneseRubyVisibility ||
+      phoneticRubyVisibility != oldDelegate.phoneticRubyVisibility ||
       rubyRasterScale != oldDelegate.rubyRasterScale ||
       !identical(ruby, oldDelegate.ruby);
 }

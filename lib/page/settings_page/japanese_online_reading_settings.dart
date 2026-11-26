@@ -22,11 +22,16 @@ const _attributionUrl = 'https://developer.yahoo.co.jp/sitemap/';
 /// inspect the dictionary or initiate an online reading request.
 class JapaneseOnlineReadingSettings extends StatefulWidget {
   const JapaneseOnlineReadingSettings(
-      {super.key, this.preferences, this.persist, this.openUrl});
+      {super.key,
+      this.preferences,
+      this.persist,
+      this.openUrl,
+      this.surface = true});
 
   final ValueNotifier<JapaneseReadingPreferences>? preferences;
   final Future<void> Function()? persist;
   final Future<void> Function(String)? openUrl;
+  final bool surface;
 
   @override
   State<JapaneseOnlineReadingSettings> createState() =>
@@ -110,20 +115,20 @@ class _JapaneseOnlineReadingSettingsState
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return SettingsSurface(
-        child: SettingsTile(
-            surface: false,
-            icon: Icons.cloud_outlined,
-            description: ui('联网假名注音'),
-            subtitle: ui('需要您自己的 Yahoo! JAPAN Client ID；自动联网开启时优先使用，失败时回退离线。'),
-            action: OutlinedButton.icon(
-                key: const ValueKey('japanese-online-configure'),
-                onPressed: _dialog == null &&
-                        SettingsSectionVisibility.isVisibleOf(context)
-                    ? _open
-                    : null,
-                icon: const Icon(Icons.cloud_outlined),
-                label: Text(ui('配置联网注音')))));
+    final tile = SettingsTile(
+        surface: false,
+        icon: Icons.cloud_outlined,
+        description: ui('联网假名注音'),
+        subtitle: ui('需要您自己的 Yahoo! JAPAN Client ID；自动联网开启时优先使用，失败时回退离线。'),
+        action: OutlinedButton.icon(
+            key: const ValueKey('japanese-online-configure'),
+            onPressed: _dialog == null &&
+                    SettingsSectionVisibility.isVisibleOf(context)
+                ? _open
+                : null,
+            icon: const Icon(Icons.cloud_outlined),
+            label: Text(ui('配置联网注音'))));
+    return widget.surface ? SettingsSurface(child: tile) : tile;
   }
 }
 
@@ -343,26 +348,29 @@ class _CredentialsDialogState extends State<_CredentialsDialog> {
                             Text(ui('仅保存在本机，用于您主动或允许的日语假名请求。'),
                                 style: theme.textTheme.bodySmall),
                             const SizedBox(height: 8),
-                            Align(
-                                alignment: AlignmentDirectional.centerStart,
-                                child: TextButton.icon(
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                TextButton.icon(
                                     key: const ValueKey(
                                         'japanese-online-register'),
                                     onPressed: _closed
                                         ? null
                                         : () => _link(_registerUrl),
                                     icon: const Icon(Icons.open_in_new),
-                                    label: Text(ui('申请 Client ID')))),
-                            Align(
-                                alignment: AlignmentDirectional.centerStart,
-                                child: TextButton(
+                                    label: Text(ui('申请 Client ID'))),
+                                TextButton(
                                     key: const ValueKey(
                                         'japanese-online-attribution'),
                                     onPressed: _closed
                                         ? null
                                         : () => _link(_attributionUrl),
                                     child: const Text(
-                                        'Web Services by Yahoo! JAPAN'))),
+                                        'Web Services by Yahoo! JAPAN')),
+                              ],
+                            ),
                             if (_saving) ...[
                               const SizedBox(height: 12),
                               const SettingsBusyIndicator.linear(),

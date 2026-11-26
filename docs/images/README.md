@@ -6,7 +6,18 @@
 
 项目页首的 [浅色图标](player-icon-light.png) 与 [深色图标](player-icon-dark.png) 直接取自 `app_icon.ico`、`app_icon_dark.ico` 中的 256px PNG 图层，与播放器使用的图标一致。
 
-## 主要页面
+## 26.1.2 快照 8
+
+以下配图来自该版本的 Flutter 页面与报告弹窗，使用内置界面字体、虚构曲库和独立的演示日志。
+
+| 语言 | 专辑分类 | 搜索 | 报告问题 |
+| --- | --- | --- | --- |
+| 简体中文 | [分类](snapshot8-categories-zh.png) | [搜索](snapshot8-search-zh.png) | [弹窗](snapshot8-report-zh.png) |
+| English | [分类](snapshot8-categories-en.png) | [搜索](snapshot8-search-en.png) | [弹窗](snapshot8-report-en.png) |
+| 日本語 | [分类](snapshot8-categories-ja.png) | [搜索](snapshot8-search-ja.png) | [弹窗](snapshot8-report-ja.png) |
+| 한국어 | [分类](snapshot8-categories-ko.png) | [搜索](snapshot8-search-ko.png) | [弹窗](snapshot8-report-ko.png) |
+
+## 早期版本的主要页面
 
 | 页面 | 浅色宽窗 | 浅色窄窗 | 深色宽窗 | 深色窄窗 |
 | --- | --- | --- | --- | --- |

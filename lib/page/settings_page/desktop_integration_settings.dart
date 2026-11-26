@@ -116,7 +116,7 @@ class _DesktopIntegrationSettingsState
       child: AppMenuAnchor(
         crossAxisUnconstrained: false,
         style: MenuStyle(
-          shape: const WidgetStatePropertyAll(AppShape.control),
+          shape: const WidgetStatePropertyAll(AppShape.surface),
           maximumSize: WidgetStatePropertyAll(Size(width, double.infinity)),
         ),
         menuChildren: [

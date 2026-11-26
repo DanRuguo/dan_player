@@ -3,6 +3,7 @@
 //! IPADIC remains the contextual analyzer. This lexicon may fill an unknown word,
 //! or divide an already established reading; it never invents a character yomi.
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, HashMap},
     fs::File,
     io::Read,
@@ -18,7 +19,10 @@ const MAX_WORDS: usize = 2_000_000;
 const MAX_ALIGNMENT_STEPS: usize = 8192;
 static WORD_LEXICON: OnceLock<ReadingLexicon> = OnceLock::new();
 static KANJI_LEXICON: OnceLock<ReadingLexicon> = OnceLock::new();
-const WORD_HASH: &str = "f4bf033fb622280875be6199d20d44fe2307310ea41b403a37f30c6b3a23a772";
+const WORD_V2_FILE: &str = "supplemental-reading-v2.bin.gz";
+const WORD_V2_HASH: &str = "474cc3a94a8c270bf1512c32849ee85df2ef83cda130f1b9b331aa9b0134b74d";
+const WORD_V1_LEGACY_FILE: &str = "supplemental-reading-v1.json.gz";
+const WORD_V1_LEGACY_HASH: &str = "f4bf033fb622280875be6199d20d44fe2307310ea41b403a37f30c6b3a23a772";
 const KANJI_HASH: &str = "18c12298210019c8b620287b0c995ca30d8fad73542ef46d395736f4e29e49d3";
 
 #[derive(Clone, Copy)]
@@ -30,15 +34,8 @@ enum ResourceKind {
 impl ResourceKind {
     fn file_name(self) -> &'static str {
         match self {
-            Self::Words => "supplemental-reading-v1.json.gz",
+            Self::Words => WORD_V2_FILE,
             Self::Kanji => "kanji-reading-v1.json.gz",
-        }
-    }
-
-    fn hash(self) -> &'static str {
-        match self {
-            Self::Words => WORD_HASH,
-            Self::Kanji => KANJI_HASH,
         }
     }
 
@@ -69,12 +66,294 @@ fn is_kana_reading(text: &str) -> bool {
     !text.is_empty()
         && text.chars().all(|c| {
             matches!(c as u32,
-        0x3041..=0x3096 | 0x3099..=0x309a | 0x30fc)
+        0x3041..=0x3096 | 0x3099..=0x309a | 0x30fc | 0x309d..=0x309e)
         })
 }
 
+fn decode_hiragana_code(code: u8) -> Result<char, String> {
+    match code {
+        1..=86 => char::from_u32(0x3041 + u32::from(code - 1))
+            .ok_or_else(|| "Invalid hiragana code".into()),
+        87 => Ok('\u{30fc}'),
+        88 => Ok('\u{309d}'),
+        89 => Ok('\u{309e}'),
+        90 => Ok('\u{3099}'),
+        91 => Ok('\u{309a}'),
+        _ => Err("Out-of-range hiragana code".into()),
+    }
+}
+
+fn decode_hiragana_bytes(bytes: &[u8]) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err("Empty hiragana reading".into());
+    }
+    let mut out = String::with_capacity(bytes.len() * 3);
+    for &b in bytes {
+        out.push(decode_hiragana_code(b)?);
+    }
+    Ok(out)
+}
+
+/// Front-coded 32-word block table searched directly in ~5.5 MB contiguous RAM
+/// instead of allocating a 505k-entry `HashMap<String, String>` (~45 MB).
+struct CompactWordLexicon {
+    count: usize,
+    block_size: usize,
+    block_offsets: Vec<u32>,
+    first_key_offsets: Vec<u32>,
+    first_keys: Vec<u8>,
+    block_data: Vec<u8>,
+}
+
+impl CompactWordLexicon {
+    fn from_danjpsup(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 84 || !data.starts_with(b"DANJPSUP") {
+            return Err("Invalid DANJPSUP header".into());
+        }
+        let version = u32::from_le_bytes(data[8..12].try_into().unwrap());
+        let count = u32::from_le_bytes(data[12..16].try_into().unwrap()) as usize;
+        let block_size = u32::from_le_bytes(data[16..20].try_into().unwrap()) as usize;
+        if version != 2 || count == 0 || count > MAX_WORDS || block_size == 0 || block_size > 256 {
+            return Err("Unsupported DANJPSUP parameters".into());
+        }
+        // Bytes 20..84 hold the 32-byte JMdict and 32-byte KANJIDIC2 SHA-256 digests.
+        let mut offset = 84usize;
+        let mut next_col = || -> Result<&[u8], String> {
+            let hdr = data.get(offset..offset + 4).ok_or("Missing DANJPSUP column")?;
+            let len = u32::from_le_bytes(hdr.try_into().unwrap()) as usize;
+            offset += 4;
+            let end = offset.checked_add(len).ok_or("DANJPSUP column overflow")?;
+            let slice = data.get(offset..end).ok_or("Truncated DANJPSUP column")?;
+            offset = end;
+            Ok(slice)
+        };
+        let col_ls = next_col()?;
+        let col_ns = next_col()?;
+        let col_sb = next_col()?;
+        let col_lr = next_col()?;
+        let col_nr = next_col()?;
+        let col_rb = next_col()?;
+        if offset != data.len() {
+            return Err("Unexpected DANJPSUP tail".into());
+        }
+
+        let num_blocks = count.div_ceil(block_size);
+        let non_anchor_count = count - num_blocks;
+        if col_ns.len() != count
+            || col_nr.len() != count
+            || col_ls.len() != non_anchor_count
+            || col_lr.len() != non_anchor_count
+        {
+            return Err("Invalid DANJPSUP column counts".into());
+        }
+
+        let mut block_offsets = Vec::with_capacity(num_blocks + 1);
+        let mut first_key_offsets = Vec::with_capacity(num_blocks + 1);
+        let mut first_keys = Vec::with_capacity(num_blocks * 14);
+        let mut block_data =
+            Vec::with_capacity(col_sb.len() + col_rb.len() + count * 4);
+
+        let (mut ils, mut ins, mut isb, mut ilr, mut inr, mut irb) = (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
+        let mut prev_s = Vec::<u8>::with_capacity(256);
+        let mut prev_r = Vec::<u8>::with_capacity(256);
+        let mut prev_global_s = Vec::<u8>::with_capacity(256);
+
+        for idx in 0..count {
+            let in_block = idx % block_size;
+            if in_block == 0 {
+                block_offsets.push(
+                    u32::try_from(block_data.len()).map_err(|_| "Block offset overflow")?,
+                );
+                first_key_offsets.push(
+                    u32::try_from(first_keys.len()).map_err(|_| "First-key offset overflow")?,
+                );
+                let ns = col_ns[ins] as usize;
+                ins += 1;
+                let nr = col_nr[inr] as usize;
+                inr += 1;
+                if ns == 0 || nr == 0 || isb + ns > col_sb.len() || irb + nr > col_rb.len() {
+                    return Err("Invalid DANJPSUP anchor entry".into());
+                }
+                prev_s.clear();
+                prev_s.extend_from_slice(&col_sb[isb..isb + ns]);
+                isb += ns;
+                prev_r.clear();
+                prev_r.extend_from_slice(&col_rb[irb..irb + nr]);
+                irb += nr;
+
+                first_keys.extend_from_slice(&prev_s);
+                block_data.push(ns as u8);
+                block_data.extend_from_slice(&prev_s);
+                block_data.push(nr as u8);
+                block_data.extend_from_slice(&prev_r);
+            } else {
+                let ls = col_ls[ils] as usize;
+                ils += 1;
+                let ns = col_ns[ins] as usize;
+                ins += 1;
+                let lr = col_lr[ilr] as usize;
+                ilr += 1;
+                let nr = col_nr[inr] as usize;
+                inr += 1;
+                if ls > prev_s.len()
+                    || ls + ns == 0
+                    || ls + ns > 255
+                    || isb + ns > col_sb.len()
+                    || lr > prev_r.len()
+                    || lr + nr == 0
+                    || lr + nr > 255
+                    || irb + nr > col_rb.len()
+                {
+                    return Err("Invalid DANJPSUP delta entry".into());
+                }
+                prev_s.truncate(ls);
+                prev_s.extend_from_slice(&col_sb[isb..isb + ns]);
+                isb += ns;
+                prev_r.truncate(lr);
+                prev_r.extend_from_slice(&col_rb[irb..irb + nr]);
+                irb += nr;
+
+                block_data.push(ls as u8);
+                block_data.push(ns as u8);
+                block_data.extend_from_slice(&prev_s[ls..]);
+                block_data.push(lr as u8);
+                block_data.push(nr as u8);
+                block_data.extend_from_slice(&prev_r[lr..]);
+            }
+
+            if idx > 0 && prev_s.as_slice() <= prev_global_s.as_slice() {
+                return Err("Unsorted DANJPSUP surface entries".into());
+            }
+            let surface_str =
+                std::str::from_utf8(&prev_s).map_err(|_| "Invalid UTF-8 in DANJPSUP")?;
+            if !surface_str.chars().any(is_han) || surface_str.encode_utf16().count() > 100 {
+                return Err("Invalid DANJPSUP surface spelling".into());
+            }
+            if prev_r.len() > 2000 || prev_r.iter().any(|&c| !(1..=91).contains(&c)) {
+                return Err("Invalid DANJPSUP reading codes".into());
+            }
+            prev_global_s.clear();
+            prev_global_s.extend_from_slice(&prev_s);
+        }
+
+        if isb != col_sb.len() || irb != col_rb.len() {
+            return Err("Unconsumed DANJPSUP suffix bytes".into());
+        }
+        block_offsets.push(u32::try_from(block_data.len()).map_err(|_| "Block offset overflow")?);
+        first_key_offsets
+            .push(u32::try_from(first_keys.len()).map_err(|_| "First-key offset overflow")?);
+
+        Ok(Self {
+            count,
+            block_size,
+            block_offsets,
+            first_key_offsets,
+            first_keys,
+            block_data,
+        })
+    }
+
+    fn first_key(&self, block_idx: usize) -> &[u8] {
+        let start = self.first_key_offsets[block_idx] as usize;
+        let end = self.first_key_offsets[block_idx + 1] as usize;
+        &self.first_keys[start..end]
+    }
+
+    fn get(&self, surface: &str) -> Option<String> {
+        let target = surface.as_bytes();
+        let num_blocks = self.block_offsets.len().saturating_sub(1);
+        if num_blocks == 0 {
+            return None;
+        }
+        let mut lo = 0usize;
+        let mut hi = num_blocks;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            if self.first_key(mid) <= target {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        let block_idx = lo.checked_sub(1)?;
+        let start = self.block_offsets[block_idx] as usize;
+        let end = self.block_offsets[block_idx + 1] as usize;
+        let slice = &self.block_data[start..end];
+        let entries_in_block = (self.count - block_idx * self.block_size).min(self.block_size);
+
+        let mut cur_s = [0u8; 256];
+        let mut cur_s_len: usize;
+        let mut cur_r = [0u8; 256];
+        let mut cur_r_len: usize;
+        let mut p = 0usize;
+
+        for i in 0..entries_in_block {
+            if i == 0 {
+                let ns = *slice.get(p)? as usize;
+                p += 1;
+                cur_s[..ns].copy_from_slice(slice.get(p..p + ns)?);
+                cur_s_len = ns;
+                p += ns;
+                let nr = *slice.get(p)? as usize;
+                p += 1;
+                cur_r[..nr].copy_from_slice(slice.get(p..p + nr)?);
+                cur_r_len = nr;
+                p += nr;
+            } else {
+                let ls = *slice.get(p)? as usize;
+                let ns = *slice.get(p + 1)? as usize;
+                p += 2;
+                cur_s[ls..ls + ns].copy_from_slice(slice.get(p..p + ns)?);
+                cur_s_len = ls + ns;
+                p += ns;
+                let lr = *slice.get(p)? as usize;
+                let nr = *slice.get(p + 1)? as usize;
+                p += 2;
+                cur_r[lr..lr + nr].copy_from_slice(slice.get(p..p + nr)?);
+                cur_r_len = lr + nr;
+                p += nr;
+            }
+            match cur_s[..cur_s_len].cmp(target) {
+                std::cmp::Ordering::Less => continue,
+                std::cmp::Ordering::Equal => {
+                    return decode_hiragana_bytes(&cur_r[..cur_r_len]).ok();
+                }
+                std::cmp::Ordering::Greater => return None,
+            }
+        }
+        None
+    }
+}
+
+enum WordStore {
+    Map(HashMap<String, String>),
+    Compact(CompactWordLexicon),
+}
+
+impl WordStore {
+    fn get(&self, surface: &str) -> Option<Cow<'_, str>> {
+        match self {
+            Self::Map(map) => map.get(surface).map(|s| Cow::Borrowed(s.as_str())),
+            Self::Compact(compact) => compact.get(surface).map(Cow::Owned),
+        }
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        match self {
+            Self::Map(map) => map.len(),
+            Self::Compact(compact) => compact.count,
+        }
+    }
+
+    #[cfg(test)]
+    fn contains_key(&self, surface: &str) -> bool {
+        self.get(surface).is_some()
+    }
+}
+
 pub(crate) struct ReadingLexicon {
-    words: HashMap<String, String>,
+    words: WordStore,
     kanji: HashMap<char, Vec<String>>,
 }
 
@@ -96,7 +375,12 @@ fn cached_resource<'a>(
     }
     // Cache successes only. Missing/bad component files can be atomically
     // replaced by an explicit component install without restarting the worker.
-    let lexicon = ReadingLexicon::load_path(&directory.join(kind.file_name()), kind).ok()?;
+    let lexicon = match kind {
+        ResourceKind::Words => ReadingLexicon::load_path(&directory.join(WORD_V2_FILE), kind)
+            .or_else(|_| ReadingLexicon::load_path(&directory.join(WORD_V1_LEGACY_FILE), kind))
+            .ok()?,
+        ResourceKind::Kanji => ReadingLexicon::load_path(&directory.join(kind.file_name()), kind).ok()?,
+    };
     let _ = cache.set(lexicon);
     cache.get()
 }
@@ -136,26 +420,41 @@ impl ReadingLexicon {
             .take((max_compressed + 1) as u64)
             .read_to_end(&mut gzip)
             .map_err(|error| error.to_string())?;
-        if gzip.len() > max_compressed || format!("{:x}", Sha256::digest(&gzip)) != kind.hash() {
+        if gzip.len() > max_compressed {
+            return Err("Invalid supplemental reading checksum".into());
+        }
+        let digest = format!("{:x}", Sha256::digest(&gzip));
+        let valid_hash = match kind {
+            ResourceKind::Words => digest == WORD_V2_HASH || digest == WORD_V1_LEGACY_HASH,
+            ResourceKind::Kanji => digest == KANJI_HASH,
+        };
+        if !valid_hash {
             return Err("Invalid supplemental reading checksum".into());
         }
         Self::load(&gzip, kind)
     }
 
     fn load(gzip: &[u8], kind: ResourceKind) -> Result<Self, String> {
-        let (max_compressed, max_json) = kind.limits();
+        let (max_compressed, max_raw) = kind.limits();
         if gzip.len() > max_compressed {
             return Err("Oversized supplemental reading dictionary".into());
         }
-        let mut json = Vec::new();
+        let mut raw = Vec::new();
         GzDecoder::new(gzip)
-            .take((max_json + 1) as u64)
-            .read_to_end(&mut json)
+            .take((max_raw + 1) as u64)
+            .read_to_end(&mut raw)
             .map_err(|error| error.to_string())?;
-        if json.len() > max_json {
+        if raw.len() > max_raw {
             return Err("Oversized supplemental reading data".into());
         }
-        Self::from_json(&json, kind)
+        if matches!(kind, ResourceKind::Words) && raw.starts_with(b"DANJPSUP") {
+            let compact = CompactWordLexicon::from_danjpsup(&raw)?;
+            return Ok(Self {
+                words: WordStore::Compact(compact),
+                kanji: HashMap::new(),
+            });
+        }
+        Self::from_json(&raw, kind)
     }
 
     fn from_json(json: &[u8], kind: ResourceKind) -> Result<Self, String> {
@@ -218,7 +517,10 @@ impl ReadingLexicon {
                 kanji.insert(character, readings);
             }
         }
-        Ok(Self { words, kanji })
+        Ok(Self {
+            words: WordStore::Map(words),
+            kanji,
+        })
     }
 
     fn enrich(
@@ -236,7 +538,7 @@ impl ReadingLexicon {
         let mut result = Vec::new();
         let mut start = 0;
         while start < words.len() {
-            let mut replacement = None;
+            let mut replacement: Option<(usize, &str, Cow<'_, str>)> = None;
             let mut contains_unknown = false;
             // Replacements span complete analyzer tokens and at least one
             // unknown Han. A fully known IPADIC span is never replaced.
@@ -247,19 +549,23 @@ impl ReadingLexicon {
                     if let Some(reading) =
                         supplemental.and_then(|lexicon| lexicon.words.get(surface))
                     {
-                        replacement = Some((end, surface, reading.as_str()));
+                        replacement = Some((end, surface, reading));
                     }
                 }
             }
-            let (end, surface, reading) = if let Some(replacement) = replacement {
-                replacement
+            let (end, surface, reading) = if let Some((end, surface, reading)) = replacement {
+                (end, surface, reading)
             } else {
-                (start + 1, words[start].0.as_str(), words[start].1.as_str())
+                (
+                    start + 1,
+                    words[start].0.as_str(),
+                    Cow::Borrowed(words[start].1.as_str()),
+                )
             };
-            if let Some(aligned) = self.align(surface, reading) {
+            if let Some(aligned) = self.align(surface, reading.as_ref()) {
                 result.extend(aligned);
             } else {
-                result.push((surface.to_owned(), reading.to_owned()));
+                result.push((surface.to_owned(), reading.into_owned()));
             }
             start = end;
         }
@@ -413,6 +719,12 @@ mod tests {
         ReadingLexicon::from_json(br#"{"version":1,"kanji":{}}"#, ResourceKind::Kanji).unwrap()
     }
 
+    fn insert_word(lexicon: &mut ReadingLexicon, surface: &str, reading: &str) {
+        if let WordStore::Map(map) = &mut lexicon.words {
+            map.insert(surface.into(), reading.into());
+        }
+    }
+
     fn pairs(values: &[(&str, &str)]) -> Vec<(String, String)> {
         values
             .iter()
@@ -423,9 +735,9 @@ mod tests {
     #[test]
     fn unknown_recovery_uses_longest_whole_word_and_preserves_context() {
         let mut lexicon = fixture();
-        lexicon.words.insert("奔る".into(), "はしる".into());
-        lexicon.words.insert("奔".into(), "ほん".into());
-        lexicon.words.insert("明日".into(), "あす".into());
+        insert_word(&mut lexicon, "奔る", "はしる");
+        insert_word(&mut lexicon, "奔", "ほん");
+        insert_word(&mut lexicon, "明日", "あす");
         let words = pairs(&[("奔", "奔"), ("る", "る"), (" ", " "), ("明日", "あした")]);
         assert_eq!(
             lexicon.enrich("奔る 明日", words, Some(&lexicon)),
@@ -490,6 +802,7 @@ mod tests {
             ResourceKind::Words
         )
         .is_err());
+        assert!(CompactWordLexicon::from_danjpsup(b"DANJPSUPtruncated").is_err());
         assert!(ReadingLexicon::load(b"invalid-gzip", ResourceKind::Words).is_err());
         assert!(is_han('々') && is_han('〻') && is_han('𠮷'));
         assert!(!is_han('あ'));
@@ -527,7 +840,7 @@ mod tests {
             ("乞うた", "こうた"),
             ("乞うて", "こうて"),
         ] {
-            assert_eq!(words.words.get(surface).map(String::as_str), Some(expected));
+            assert_eq!(words.words.get(surface).as_deref(), Some(expected));
         }
         assert!(!words.words.contains_key("今日"));
         assert!(!words.words.contains_key("生物"));
@@ -604,7 +917,7 @@ mod tests {
         assert!(word_cache.get().is_none());
         std::fs::write(
             directory.join(ResourceKind::Words.file_name()),
-            include_bytes!("../assets/supplemental-reading-v1.json.gz"),
+            include_bytes!("../assets/supplemental-reading-v2.bin.gz"),
         )
         .unwrap();
         assert_eq!(

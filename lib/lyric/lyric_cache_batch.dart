@@ -5,6 +5,7 @@ import 'package:dan_player/lyric/lyric_document.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/lyric/lyric_lookup_status.dart';
 import 'package:dan_player/lyric/online_lyric_cache.dart';
+import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/music_matcher.dart';
 import 'package:dan_player/lyric/cached_lyric.dart';
 import 'package:dan_player/search/lyric_search_index.dart';
@@ -160,16 +161,18 @@ class LyricCacheBatch extends ChangeNotifier {
       final latest = _documents.forAudio(audio);
       return latest?.noLyrics == true || latest?.effective != null;
     }
+    final pinnedLocal = source?.source == LyricSourceType.local;
     final local = await (readLocal?.call(audio) ??
-        readLocalLyric(audio, stillCurrent: unchanged));
+        readLocalLyric(audio,
+            allowEmbeddedPlain: pinnedLocal, stillCurrent: unchanged));
     if (!unchanged()) {
       final latest = _documents.forAudio(audio);
       return latest?.noLyrics == true || latest?.effective != null;
     }
     if (local == null || !hasLyricContent(local)) {
-      return await readCachedLocalLyric(audio,
-              cache: cache, stillCurrent: unchanged) !=
-          null;
+      final cachedLocal = await readCachedLocalLyric(audio,
+          cache: cache, stillCurrent: unchanged);
+      return cachedLocal != null && (pinnedLocal || cachedLocal is! PlainLyric);
     }
     (searchIndex ?? LyricSearchIndex.instance)
         .rememberLoadedLocal(audio, local);

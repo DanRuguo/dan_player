@@ -1,73 +1,68 @@
 {
-  "Version": "7.1.1-full_build-www.gyan.dev",
-  "Source": "https://github.com/FFmpeg/FFmpeg/commit/db69d06eee",
-  "Provider": "https://www.gyan.dev/ffmpeg/builds/",
-  "License": "GPL-3.0",
-  "Files": [
-    {
-      "Name": "avcodec-61.dll",
-      "Size": 89117184,
-      "Sha256": "0209f3620970037bbade73939e53bd51f4422b3a79f290b130c2eb1224087cf7"
-    },
-    {
-      "Name": "avdevice-61.dll",
-      "Size": 4514816,
-      "Sha256": "53144e6fc84c0e2d977cdd10c347d35ca886e30b6eb72f339abaa3c570262661"
-    },
-    {
-      "Name": "avfilter-10.dll",
-      "Size": 41882624,
-      "Sha256": "910321e4a32329dcd8057ce189a003f4be3c631a645daa34c9dcc344a0aa767e"
-    },
-    {
-      "Name": "avformat-61.dll",
-      "Size": 18723328,
-      "Sha256": "233cd46f0f5860c032d65d7bd124ae945470883b85e1d1bc248991fe8115a28e"
-    },
-    {
-      "Name": "avutil-59.dll",
-      "Size": 2840576,
-      "Sha256": "2e6cd0a65a892c3af3d0cc1b6588e2ed8304c0e22e7488b7629e2b3e98cd8573"
-    },
-    {
-      "Name": "ffmpeg.exe",
-      "Size": 431616,
-      "Sha256": "82813a6b5e4c3590c6fc36553d74e1812f51dd48d2a46cd0f966785fde9609eb"
-    },
-    {
-      "Name": "ffplay.exe",
-      "Size": 15461888,
-      "Sha256": "799badf6f33cde85eef28995f2bad1252bc3871b1c5505d4754661e6b735cc47"
-    },
-    {
-      "Name": "ffprobe.exe",
-      "Size": 221184,
-      "Sha256": "21757b5df8f2247a2c7176e279cdc4f80039e07a19288d374c164f7bef00468e"
-    },
-    {
-      "Name": "LICENSE",
-      "Size": 35147,
-      "Sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
-    },
-    {
-      "Name": "postproc-58.dll",
-      "Size": 87552,
-      "Sha256": "079d7da925d44d399daac6d4f0503154e4ff655cf4cb026246cf56fb3f4a3246"
-    },
-    {
-      "Name": "README.txt",
-      "Size": 43770,
-      "Sha256": "0b0bc309cdc5e6f4b8aad76f3801fc3ba0dab6dbe5008ebb6f2cf3bbc28777c9"
-    },
-    {
-      "Name": "swresample-5.dll",
-      "Size": 438784,
-      "Sha256": "d0294107447a14168ce4343fc54105886d2b595efd5d52f51fe04177fbd230ca"
-    },
-    {
-      "Name": "swscale-8.dll",
-      "Size": 707584,
-      "Sha256": "c01dd5d2995ec445315b9e67ad444e349d3186b5c0efd31ea599b48594b51250"
-    }
-  ]
+    "Version":  "7.1.1-audio_shared-danplayer",
+    "Source":  "https://ffmpeg.org/releases/ffmpeg-7.1.1.tar.xz",
+    "Provider":  "https://ffmpeg.org/",
+    "License":  "GPL-3.0",
+    "Files":  [
+                  {
+                      "Name":  "avcodec-61.dll",
+                      "Size":  5679104,
+                      "Sha256":  "49e1b7e4a5f995d6f3e8b4182e6f1478bcdd153a59d8ff7fe398d942a7a11f8a"
+                  },
+                  {
+                      "Name":  "avdevice-61.dll",
+                      "Size":  62464,
+                      "Sha256":  "e4d686485c4c1bb11d7229d5178fe44e462988364b02ccaa0f4f50b5d4334f5c"
+                  },
+                  {
+                      "Name":  "avfilter-10.dll",
+                      "Size":  766464,
+                      "Sha256":  "d27f8636a1ae19b41b35feae89a2dc238189658cfbe058d6d00aca557f6b55ea"
+                  },
+                  {
+                      "Name":  "avformat-61.dll",
+                      "Size":  1431552,
+                      "Sha256":  "dfe2439da148beea0d37544b887342fb1563a4ab9bcd10b6fb261faf9873c04f"
+                  },
+                  {
+                      "Name":  "avutil-59.dll",
+                      "Size":  707072,
+                      "Sha256":  "cb2ec89a9bd12581b3633973c766733478be8fa0c5126a7bdb77f73e516bf49d"
+                  },
+                  {
+                      "Name":  "ffmpeg.exe",
+                      "Size":  324096,
+                      "Sha256":  "a2858eb5311339d53fea28446c49358b5a05a494860a132e6d4d0d03954710c0"
+                  },
+                  {
+                      "Name":  "ffplay.exe",
+                      "Size":  1917440,
+                      "Sha256":  "24c3b902ae19fab7fa3e3fb29c4a9b5bf247cd6ad43541bb9ffa5bc289b1840b"
+                  },
+                  {
+                      "Name":  "ffprobe.exe",
+                      "Size":  174592,
+                      "Sha256":  "0c66d18647d9777167022cf3b8a9944690e729891e5329d960a66a6b276030bd"
+                  },
+                  {
+                      "Name":  "LICENSE",
+                      "Size":  35147,
+                      "Sha256":  "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+                  },
+                  {
+                      "Name":  "README.txt",
+                      "Size":  1044,
+                      "Sha256":  "467052bc344890b91c2782f3535029a1bfa556a043097bdeff4b91f5c0f6b583"
+                  },
+                  {
+                      "Name":  "swresample-5.dll",
+                      "Size":  111104,
+                      "Sha256":  "e6a4603dee4dd32b82a3e28d01306d42a9eecca00280252babc494b3b5a70d6a"
+                  },
+                  {
+                      "Name":  "swscale-8.dll",
+                      "Size":  561152,
+                      "Sha256":  "1ec5644b2fb080fc0317eb836dd2c8ce472ca9aa66c6d62cc2a5545a4a719209"
+                  }
+              ]
 }

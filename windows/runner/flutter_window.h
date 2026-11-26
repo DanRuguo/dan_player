@@ -15,6 +15,7 @@ class DesktopIntegrationController;
 class InstallerLauncherController;
 class WindowsShellController;
 class JapanesePhoneticController;
+class TouchSoundController;
 namespace window_resize { class ChildResizeBridge; }
 
 // A window that does nothing but host a Flutter view.
@@ -47,6 +48,7 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<InstallerLauncherController> installer_launcher_;
   std::unique_ptr<WindowsShellController> windows_shell_;
   std::unique_ptr<JapanesePhoneticController> japanese_phonetic_;
+  std::unique_ptr<TouchSoundController> touch_sound_;
 
 };
 

@@ -32,7 +32,8 @@ class JapaneseReadingBatchSettings extends StatefulWidget {
       this.installerFactory,
       this.preferences,
       this.automaticallyOnline,
-      this.persist});
+      this.persist,
+      this.surface = true});
 
   final JapaneseReadingBatch? task;
   final JapaneseDictionaryRuntime? dictionaryRuntime;
@@ -40,6 +41,7 @@ class JapaneseReadingBatchSettings extends StatefulWidget {
   final ValueNotifier<JapaneseReadingPreferences>? preferences;
   final ValueListenable<bool>? automaticallyOnline;
   final Future<void> Function()? persist;
+  final bool surface;
 
   @override
   State<JapaneseReadingBatchSettings> createState() =>
@@ -142,21 +144,20 @@ class _JapaneseReadingBatchSettingsState
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return SettingsSurface(
-      child: SettingsTile(
-          surface: false,
-          icon: Icons.translate_outlined,
-          description: ui('批量生成日语假名'),
-          subtitle: ui(_description),
-          action: OutlinedButton.icon(
-              key: const ValueKey('japanese-reading-batch-open'),
-              onPressed: _dialog == null &&
-                      SettingsSectionVisibility.isVisibleOf(context)
-                  ? _open
-                  : null,
-              icon: const Icon(Icons.translate_outlined),
-              label: Text(ui('打开批量生成')))),
-    );
+    final tile = SettingsTile(
+        surface: false,
+        icon: Icons.translate_outlined,
+        description: ui('批量生成日语假名'),
+        subtitle: ui(_description),
+        action: OutlinedButton.icon(
+            key: const ValueKey('japanese-reading-batch-open'),
+            onPressed: _dialog == null &&
+                    SettingsSectionVisibility.isVisibleOf(context)
+                ? _open
+                : null,
+            icon: const Icon(Icons.translate_outlined),
+            label: Text(ui('打开批量生成'))));
+    return widget.surface ? SettingsSurface(child: tile) : tile;
   }
 }
 
@@ -383,7 +384,6 @@ class _BatchDialogState extends State<_BatchDialog> {
                                             JapaneseReadingRequestMode>(
                                         key: const ValueKey(
                                             'japanese-reading-batch-mode'),
-                                        maxWidth: 360,
                                         wrapCompactLabel: true,
                                         semanticLabel: ui('日语假名生成方式'),
                                         value: _manualMode,

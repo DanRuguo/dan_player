@@ -116,7 +116,8 @@ class TrackResumeSettingsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     return SettingsSurface(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       SettingsHeader(
           title: ui('按曲记忆播放位置'),
           icon: Icons.history,
@@ -170,13 +171,37 @@ class TrackResumeSettingsPanel extends StatelessWidget {
         ),
       ],
       const SizedBox(height: 12),
-      Text(ui('默认关闭。会话恢复、手动定位和 A–B 循环优先；播完或距结尾不足 10 秒时不续播。')),
-      const SizedBox(height: 8),
-      OutlinedButton.icon(
+      LayoutBuilder(builder: (context, constraints) {
+        final note = Text(
+          ui('默认关闭。会话恢复、手动定位和 A–B 循环优先；播完或距结尾不足 10 秒时不续播。'),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant),
+        );
+        final clearButton = OutlinedButton.icon(
           key: const ValueKey('track-resume-clear'),
           onPressed: onClear,
           icon: const Icon(Icons.history_toggle_off),
-          label: Text(ui('清除自动记忆位置'))),
+          label: Text(ui('清除自动记忆位置')),
+        );
+        final scale = MediaQuery.textScalerOf(context).scale(1);
+        if (constraints.maxWidth >= 520 * scale) {
+          return Row(
+            children: [
+              Expanded(child: note),
+              const SizedBox(width: 16),
+              clearButton,
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            note,
+            const SizedBox(height: 8),
+            clearButton,
+          ],
+        );
+      }),
       if (error != null)
         Padding(
             padding: const EdgeInsets.only(top: 8),

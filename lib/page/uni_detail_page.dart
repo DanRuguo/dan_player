@@ -8,6 +8,7 @@ import 'package:dan_player/component/detail_header_backdrop.dart';
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/component/app_entrance.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_content_transition.dart';
 import 'package:dan_player/component/app_content_scrollbar.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
@@ -35,6 +36,15 @@ typedef DetailContentBuilder<T> = Widget Function(
   MultiSelectController<T>? multiSelectController,
 );
 
+typedef DetailSectionHeaderBuilder<T> = Widget? Function(
+  BuildContext context,
+  T item,
+  int index,
+  List<T> visibleContent,
+  SortMethodDesc<T>? sortMethod,
+  SortOrder sortOrder,
+);
+
 /// `ArtistDetailPage`, `AlbumDetailPage` 页面的主要组件。
 ///
 /// `P`: 第一内容；`S`: 第二内容（主要）；`T`: 第三内容
@@ -54,8 +64,10 @@ class UniDetailPage<P, S, T> extends StatefulWidget {
     required this.picShape,
     required this.title,
     required this.subtitle,
+    this.badgeLabel,
     required this.secondaryContent,
     required this.secondaryContentBuilder,
+    this.secondarySectionHeaderBuilder,
     required this.tertiaryContentTitle,
     required this.tertiaryContent,
     required this.tertiaryContentBuilder,
@@ -91,9 +103,11 @@ class UniDetailPage<P, S, T> extends StatefulWidget {
 
   final String title;
   final String subtitle;
+  final String? badgeLabel;
 
   final List<S> secondaryContent;
   final DetailContentBuilder<S> secondaryContentBuilder;
+  final DetailSectionHeaderBuilder<S>? secondarySectionHeaderBuilder;
 
   /// Supplying this enables the in-page search field. The filtered list is
   /// also handed to [secondaryContentBuilder], keeping playback indices and
@@ -245,7 +259,11 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
         }
         return;
       }
-      if (MediaQuery.textScalerOf(context).scale(14) <= 14) {
+      final visible = _visibleSecondaryContent();
+      final hasSectionHeaders =
+          _hasActiveSectionHeaders(context, visible);
+      if (!hasSectionHeaders &&
+          MediaQuery.textScalerOf(context).scale(14) <= 14) {
         _jumpScrollTo(targetAt * 64.0);
         return;
       }
@@ -375,7 +393,6 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
     final visibleSecondaryContent = _visibleSecondaryContent();
 
     final List<Widget> actions = [];
-    actions.addAll(widget.extraActions);
     if (widget.enableLocatePlaying) {
       actions.add(_locatePlayingAction(context));
     }
@@ -409,6 +426,9 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
         setContentView: setContentView,
       ));
     }
+    // Keep page-specific actions (e.g. Album cover repair) at the trailing end
+    // so shared controls stay at identical X positions across detail pages.
+    actions.addAll(widget.extraActions);
 
     final page = widget.multiSelectController == null
         ? result(null, actions, scheme)
@@ -489,6 +509,7 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
                                 picShape: widget.picShape,
                                 title: widget.title,
                                 subtitle: widget.subtitle,
+                                badgeLabel: widget.badgeLabel,
                                 actions: actions,
                                 multiSelectController: multiSelectController,
                                 multiSelectViewActions: multiSelectViewActions,
@@ -499,11 +520,10 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
                           key: const ValueKey('uni-detail-search'),
                           controller: _search,
                           onChanged: (value) => setState(() => _query = value),
-                          decoration: InputDecoration(
+                          decoration: AppShape.searchDecoration(
+                            context,
                             hintText: widget.secondaryContentSearchHint ??
                                 ui("搜索标题、歌手或专辑"),
-                            prefixIcon: const Icon(Icons.search),
-                            border: AppShape.inputBorder,
                             suffixIcon: _query.isEmpty
                                 ? null
                                 : IconButton(
@@ -512,7 +532,8 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
                                       _query = '';
                                       _search.clear();
                                     }),
-                                    icon: const Icon(Icons.close),
+                                    icon: const Icon(Icons.close_rounded,
+                                        size: 19),
                                   ),
                           ),
                         ),
@@ -530,32 +551,38 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
                               key: const ValueKey('uni-detail-content-scroll'),
                               controller: controller,
                               slivers: [
-                                // secondary content
-                                switch (currContentView) {
-                                  ContentView.list =>
-                                    MediaQuery.textScalerOf(context).scale(14) >
-                                            14
-                                        ? SliverList.builder(
-                                            itemCount:
-                                                visibleSecondaryContent.length,
-                                            itemBuilder: (context, i) =>
-                                                _secondaryItem(
-                                                    context,
-                                                    i,
-                                                    visibleSecondaryContent,
-                                                    multiSelectController),
-                                          )
-                                        : SliverFixedExtentList.builder(
-                                            itemExtent: 64,
-                                            itemCount:
-                                                visibleSecondaryContent.length,
-                                            itemBuilder: (context, i) =>
-                                                _secondaryItem(
-                                                    context,
-                                                    i,
-                                                    visibleSecondaryContent,
-                                                    multiSelectController),
-                                          ),
+                                  // secondary content
+                                  switch (currContentView) {
+                                    ContentView.list =>
+                                      _hasActiveSectionHeaders(
+                                                  context,
+                                                  visibleSecondaryContent) ||
+                                              MediaQuery.textScalerOf(context)
+                                                      .scale(14) >
+                                                  14
+                                          ? SliverList.builder(
+                                              itemCount:
+                                                  visibleSecondaryContent.length,
+                                              itemBuilder: (context, i) =>
+                                                  _secondaryItem(
+                                                      context,
+                                                      i,
+                                                      visibleSecondaryContent,
+                                                      multiSelectController,
+                                                      includeSectionHeader:
+                                                          true),
+                                            )
+                                          : SliverFixedExtentList.builder(
+                                              itemExtent: 64,
+                                              itemCount:
+                                                  visibleSecondaryContent.length,
+                                              itemBuilder: (context, i) =>
+                                                  _secondaryItem(
+                                                      context,
+                                                      i,
+                                                      visibleSecondaryContent,
+                                                      multiSelectController),
+                                            ),
                                   ContentView.table => MusicGridScope(
                                       child: SliverGrid.builder(
                                         gridDelegate:
@@ -642,15 +669,50 @@ class _UniDetailPageState<P, S, T> extends State<UniDetailPage<P, S, T>> {
     );
   }
 
-  Widget _secondaryItem(BuildContext context, int index, List<S> visibleContent,
-      MultiSelectController<S>? controller) {
+  bool _hasActiveSectionHeaders(BuildContext context, List<S> visibleContent) {
+    final builder = widget.secondarySectionHeaderBuilder;
+    if (builder == null || visibleContent.isEmpty) return false;
+    for (var i = 0; i < visibleContent.length; i++) {
+      if (builder(context, visibleContent[i], i, visibleContent, currSortMethod,
+              currSortOrder) !=
+          null) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Widget _secondaryItem(
+    BuildContext context,
+    int index,
+    List<S> visibleContent,
+    MultiSelectController<S>? controller, {
+    bool includeSectionHeader = false,
+  }) {
     final item = visibleContent[index];
+    final header = includeSectionHeader
+        ? widget.secondarySectionHeaderBuilder?.call(
+            context,
+            item,
+            index,
+            visibleContent,
+            currSortMethod,
+            currSortOrder,
+          )
+        : null;
+    final row = widget.secondaryContentBuilder(
+        context, item, index, visibleContent, controller);
     return AppEntrance(
       key: ValueKey(item),
       identity: ('detail-secondary', item),
       order: index,
-      child: widget.secondaryContentBuilder(
-          context, item, index, visibleContent, controller),
+      child: header == null
+          ? row
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [header, row],
+            ),
     );
   }
 }
@@ -725,6 +787,7 @@ class _UniDetailPageHeader extends StatelessWidget {
     required this.picShape,
     required this.title,
     required this.subtitle,
+    this.badgeLabel,
     this.multiSelectController,
     required this.actions,
     this.multiSelectViewActions,
@@ -738,6 +801,7 @@ class _UniDetailPageHeader extends StatelessWidget {
 
   final String title;
   final String subtitle;
+  final String? badgeLabel;
   final MultiSelectController? multiSelectController;
   final List<Widget> actions;
   final List<Widget>? multiSelectViewActions;
@@ -746,13 +810,17 @@ class _UniDetailPageHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    final canPop = Navigator.maybeOf(context)?.canPop() ?? false;
+    final dpr = MediaQuery.devicePixelRatioOf(context);
     return LayoutBuilder(builder: (context, constraints) {
       final wide = constraints.maxWidth >= 760 &&
           MediaQuery.textScalerOf(context).scale(14) < 20;
+      // Unified 192px wide cover dimension keeps header height, title/toolbar
+      // origin, search bar Y and song-list Y 100% identical between Album and
+      // Artist detail pages so cross-navigation never jumps.
       final coverSize = wide
-          ? picShape == PicShape.oval
-              ? 176.0
-              : 200.0
+          ? 192.0
           : constraints.maxWidth >= 400
               ? 96.0
               : 72.0;
@@ -768,10 +836,79 @@ class _UniDetailPageHeader extends StatelessWidget {
               : actions,
         ),
       );
+      final hasEyebrow = canPop || (badgeLabel != null && badgeLabel!.isNotEmpty);
+      final eyebrow = !hasEyebrow
+          ? null
+          : Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  if (canPop)
+                    SizedBox(
+                      height: 30,
+                      child: FilledButton.tonalIcon(
+                        key: const ValueKey('uni-detail-back'),
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        style: FilledButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          minimumSize: const Size(0, 30),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 0,
+                          ),
+                          shape: AppShape.pill,
+                          backgroundColor: scheme.surfaceContainerHigh
+                              .withValues(alpha: isDark ? .84 : .90),
+                          foregroundColor: scheme.onSurface,
+                        ),
+                        icon: const Icon(Icons.arrow_back_rounded, size: 16),
+                        label: Text(
+                          ui('返回'),
+                          maxLines: 1,
+                          softWrap: false,
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (badgeLabel != null && badgeLabel!.isNotEmpty)
+                    DecoratedBox(
+                      decoration: ShapeDecoration(
+                        color: scheme.primaryContainer
+                            .withValues(alpha: isDark ? .68 : .82),
+                        shape: AppShape.pill,
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        child: Text(
+                          badgeLabel!,
+                          maxLines: 1,
+                          softWrap: false,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: scheme.onPrimaryContainer,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            );
       final text = Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (eyebrow != null) eyebrow,
           Tooltip(
             message: title,
             child: appFontText(
@@ -786,6 +923,7 @@ class _UniDetailPageHeader extends StatelessWidget {
                   fontWeight: FontWeight.bold),
             ),
           ),
+          const SizedBox(height: 2),
           Tooltip(
             message: subtitle,
             child: appFontText(
@@ -795,7 +933,7 @@ class _UniDetailPageHeader extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 14,
-                color: scheme.onSurface,
+                color: scheme.onSurfaceVariant,
                 fontFeatures: tabularFiguresFeatures,
               ),
             ),
@@ -805,81 +943,108 @@ class _UniDetailPageHeader extends StatelessWidget {
       final cover = SizedBox.square(
         key: const ValueKey('uni-detail-cover'),
         dimension: coverSize,
-        child: CategoryCoverFlight(
-            key: coverFlightKey,
-            tag: coverFlightTag,
-            radius: picShape == PicShape.oval
-                ? coverSize / 2
-                : AppShape.surfaceRadius.topLeft.x,
-            child: ArtworkHandoff(
-              artworkKey: pic,
-              loadArtwork: () => pic,
-              placeholder: Icon(Symbols.broken_image,
-                  size: coverSize, color: scheme.onSurface),
-              loading: const Center(child: CircularProgressIndicator()),
-              imageBuilder: (provider) {
-                Widget error(BuildContext _, Object __, StackTrace? ___) =>
-                    Icon(Symbols.broken_image,
-                        size: coverSize, color: scheme.onSurface);
-                final image = mayAnimateArtwork(provider)
-                    ? AnimatedArtwork(image: provider, errorBuilder: error)
-                    : Image(
-                        image: provider,
-                        gaplessPlayback: true,
-                        width: coverSize,
-                        height: coverSize,
-                        fit: BoxFit.cover,
-                        filterQuality: FilterQuality.high,
-                        errorBuilder: error);
-                return picShape == PicShape.oval
-                    ? ClipOval(child: image)
-                    : ClipRRect(
-                        borderRadius: AppShape.surfaceRadius, child: image);
-              },
-            )),
+        child: FutureBuilder<ImageProvider?>(
+          future: pic,
+          builder: (context, snapshot) => CategoryCoverFlight(
+              key: coverFlightKey,
+              tag: coverFlightTag,
+              image: snapshot.data,
+              radius: picShape == PicShape.oval
+                  ? coverSize / 2
+                  : AppShape.surfaceRadius.topLeft.x,
+              child: ArtworkHandoff(
+                artworkKey: pic,
+                loadArtwork: () => pic,
+                placeholder: Icon(Symbols.broken_image,
+                    size: coverSize, color: scheme.onSurface),
+                loading: const Center(child: CircularProgressIndicator()),
+                imageBuilder: (provider) {
+                  Widget error(BuildContext _, Object __, StackTrace? ___) =>
+                      Icon(Symbols.broken_image,
+                          size: coverSize, color: scheme.onSurface);
+                  final image = mayAnimateArtwork(provider)
+                      ? AnimatedArtwork(image: provider, errorBuilder: error)
+                      : Image(
+                          image: provider,
+                          gaplessPlayback: true,
+                          width: coverSize,
+                          height: coverSize,
+                          fit: BoxFit.cover,
+                          filterQuality: FilterQuality.high,
+                          errorBuilder: error);
+                  return picShape == PicShape.oval
+                      ? ClipOval(child: image)
+                      : ClipRRect(
+                          borderRadius: AppShape.surfaceRadius, child: image);
+                },
+              )),
+        ),
       );
+      final glideDuration = AppMotion.duration(
+        context,
+        MotionKind.transitions,
+        AppMotion.emphasized,
+      );
+      Widget sharedAxisDetails(Widget detailsChild) =>
+          TweenAnimationBuilder<double>(
+            key: ValueKey(('uni-detail-meta-glide', key)),
+            tween: Tween<double>(
+              begin: glideDuration == Duration.zero ? 1.0 : 0.0,
+              end: 1.0,
+            ),
+            duration: glideDuration,
+            curve: AppMotion.emphasizedCurve,
+            child: detailsChild,
+            builder: (context, value, child) => Transform.translate(
+              offset: snapOffsetToPhysicalPixel(
+                Offset(10.0 * (1.0 - value), 0),
+                dpr,
+              ),
+              child: child,
+            ),
+          );
       return ClipRRect(
         borderRadius: AppShape.surfaceRadius,
         child: Stack(
           children: [
             Positioned.fill(
                 child: DetailHeaderBackdrop(artwork: backgroundPic)),
-            AppEntrance(
-              identity: 'detail-header',
-              translate: coverFlightTag == null,
-              child: Padding(
-                padding: EdgeInsets.all(wide ? 16 : 12),
-                child: wide
-                    ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                            cover,
-                            const SizedBox(width: 16),
-                            Expanded(
-                                child: Column(
+            Padding(
+              padding: EdgeInsets.all(wide ? 16 : 12),
+              child: wide
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        cover,
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: sharedAxisDetails(
+                            Column(
                               mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 text,
                                 const SizedBox(height: 8),
-                                controls
+                                controls,
                               ],
-                            )),
-                          ])
-                    : Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Row(children: [
-                            cover,
-                            const SizedBox(width: 12),
-                            Expanded(child: text),
-                          ]),
-                          const SizedBox(height: 12),
-                          controls,
-                        ],
-                      ),
-              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(children: [
+                          cover,
+                          const SizedBox(width: 12),
+                          Expanded(child: sharedAxisDetails(text)),
+                        ]),
+                        const SizedBox(height: 12),
+                        sharedAxisDetails(controls),
+                      ],
+                    ),
             ),
           ],
         ),

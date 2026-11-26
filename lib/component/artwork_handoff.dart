@@ -170,11 +170,20 @@ class _ArtworkHandoffState extends State<ArtworkHandoff>
     _releaseFirstFrameAnimation();
     _loading = true;
     final configuration = createLocalImageConfiguration(context);
-    _timeout = Timer(ArtworkHandoff.loadTimeout, () => _finish(request, null));
-    Future<ImageProvider?>.sync(widget.loadArtwork).then((provider) {
+    var inResolve = true;
+    var settledSynchronously = false;
+    late final Future<ImageProvider?> loadFuture;
+    try {
+      loadFuture = widget.loadArtwork();
+    } catch (_) {
+      _finish(request, null, syncResolve: true);
+      return;
+    }
+    loadFuture.then((provider) {
       if (!_isCurrent(request)) return;
       if (provider == null) {
-        _finish(request, null);
+        settledSynchronously = inResolve;
+        _finish(request, null, syncResolve: inResolve);
         return;
       }
       try {
@@ -194,6 +203,8 @@ class _ArtworkHandoffState extends State<ArtworkHandoff>
           }
           _timeout?.cancel();
           _timeout = null;
+          final syncCommit = inResolve && synchronousCall;
+          if (syncCommit) settledSynchronously = true;
           var animateInitial = _displayed == null &&
               widget.animateFirstFrame &&
               !synchronousCall &&
@@ -213,15 +224,31 @@ class _ArtworkHandoffState extends State<ArtworkHandoff>
             // SnapshotWidget captures this same mixed subtree on its next
             // paint, then the post-frame handoff releases the old clocks.
           } else {
-            _commitProvider(provider, animateInitial: animateInitial);
+            _commitProvider(
+              provider,
+              animateInitial: animateInitial,
+              syncResolve: syncCommit,
+            );
           }
-        }, onError: (Object _, StackTrace? __) => _finish(request, null));
+        }, onError: (Object _, StackTrace? __) {
+          if (inResolve) settledSynchronously = true;
+          _finish(request, null, syncResolve: inResolve);
+        });
         _removeListener = () => stream.removeListener(listener);
         stream.addListener(listener);
       } catch (_) {
-        _finish(request, null);
+        settledSynchronously = inResolve;
+        _finish(request, null, syncResolve: inResolve);
       }
-    }, onError: (Object _, StackTrace __) => _finish(request, null));
+    }, onError: (Object _, StackTrace __) {
+      if (inResolve) settledSynchronously = true;
+      _finish(request, null, syncResolve: inResolve);
+    });
+    inResolve = false;
+    if (!settledSynchronously && _isCurrent(request) && _loading) {
+      _timeout =
+          Timer(ArtworkHandoff.loadTimeout, () => _finish(request, null));
+    }
   }
 
   bool _isCurrent(int request) => mounted && request == _request;
@@ -281,8 +308,12 @@ class _ArtworkHandoffState extends State<ArtworkHandoff>
     return true;
   }
 
-  void _commitProvider(ImageProvider provider, {bool animateInitial = false}) {
-    setState(() {
+  void _commitProvider(
+    ImageProvider provider, {
+    bool animateInitial = false,
+    bool syncResolve = false,
+  }) {
+    void apply() {
       if (!_motionAllowed) _releaseFrozen();
       _previous = _frozen == null && _displayed != provider && _motionAllowed
           ? _displayed
@@ -290,7 +321,13 @@ class _ArtworkHandoffState extends State<ArtworkHandoff>
       _displayed = provider;
       _frozenOnly = false;
       _loading = false;
-    });
+    }
+
+    if (syncResolve || !mounted) {
+      apply();
+    } else {
+      setState(apply);
+    }
     _animatingFirstFrame = animateInitial;
     if ((_previous == null && _frozen == null && !animateInitial) ||
         !_motionAllowed) {
@@ -365,19 +402,29 @@ class _ArtworkHandoffState extends State<ArtworkHandoff>
     if (ready != null) _releaseDecodedAfterMount();
   }
 
-  void _finish(int request, ImageProvider? provider) {
+  void _finish(
+    int request,
+    ImageProvider? provider, {
+    bool syncResolve = false,
+  }) {
     if (!_isCurrent(request)) return;
     // Invalidate late loader/codec results after failure or timeout as well.
     ++_request;
     _cancelPending();
     _cancelCapture();
-    setState(() {
+    void apply() {
       _displayed = provider;
       _previous = null;
       _loading = false;
       _animatingFirstFrame = false;
       _releaseFrozen();
-    });
+    }
+
+    if (syncResolve || !mounted) {
+      apply();
+    } else {
+      setState(apply);
+    }
     _transition.value = 1;
     _releaseFirstFrameAnimation();
   }

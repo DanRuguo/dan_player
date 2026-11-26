@@ -1307,6 +1307,58 @@ fn album_artist_from_tags(tags: &[&Tag]) -> Option<(String, TagType)> {
     })
 }
 
+fn disc_subtitle_from_tags(tags: &[&Tag]) -> Option<String> {
+    first_tag_text_with_source(tags, &ItemKey::SetSubtitle)
+        .map(|(value, _)| value)
+        .or_else(|| {
+            tags.iter().find_map(|tag| {
+                tag.items().find_map(|item| {
+                    let is_custom = matches!(
+                        item.key(),
+                        ItemKey::Unknown(key)
+                            if key.eq_ignore_ascii_case("DISCSUBTITLE")
+                                || key.eq_ignore_ascii_case("DISC SUBTITLE")
+                                || key.eq_ignore_ascii_case("SETSUBTITLE")
+                                || key.eq_ignore_ascii_case("SET SUBTITLE")
+                    );
+                    if !is_custom {
+                        return None;
+                    }
+                    item.value()
+                        .text()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty() && !text_looks_misdecoded(value))
+                        .map(str::to_owned)
+                })
+            })
+        })
+}
+
+/// Resolves nominal kbps for formats like `.opus` or container streams whose
+/// codec header omits `audio_bitrate`, falling back to container `overall_bitrate`
+/// and finally bounded `(file_size * 8) / duration_ms`.
+fn effective_bitrate_kbps(
+    audio_bitrate: Option<u32>,
+    overall_bitrate: Option<u32>,
+    file_size_bytes: Option<u64>,
+    duration_ms: u128,
+) -> Option<u32> {
+    if let Some(kbps) = audio_bitrate.filter(|&value| value > 0) {
+        return Some(kbps);
+    }
+    if let Some(kbps) = overall_bitrate.filter(|&value| value > 0) {
+        return Some(kbps);
+    }
+    let size = file_size_bytes.filter(|&value| value > 0)?;
+    if duration_ms == 0 {
+        return None;
+    }
+    let computed = (u128::from(size) * 8) / duration_ms;
+    u32::try_from(computed)
+        .ok()
+        .filter(|&value| value > 0 && value <= 100_000)
+}
+
 pub(crate) fn has_indexed_title(file: &TaggedFile) -> bool {
     first_tag_text_with_source(&ordered_tags(file), &ItemKey::TrackTitle).is_some()
 }
@@ -1365,6 +1417,7 @@ pub(crate) struct Audio {
     classification_version: u64,
     track: Option<u32>,
     disc_number: Option<u32>,
+    disc_subtitle: Option<String>,
     /// in secs
     duration: u64,
     /// Successful duration-reader algorithm version. Missing old values are
@@ -1449,6 +1502,7 @@ impl Audio {
             classification_version: 0,
             track: None,
             disc_number: None,
+            disc_subtitle: None,
             duration: 0,
             duration_version: 0,
             bitrate: None,
@@ -1464,7 +1518,7 @@ impl Audio {
     }
 
     pub(crate) fn to_json_value(&self) -> serde_json::Value {
-        serde_json::json!({
+        let mut object = serde_json::json!({
             "title": self.title,
             "artist": self.artist,
             "album": self.album,
@@ -1483,7 +1537,11 @@ impl Audio {
             "modified": self.modified,
             "created": self.created,
             "by": self.by
-        })
+        });
+        if let Some(subtitle) = &self.disc_subtitle {
+            object["disc_subtitle"] = serde_json::Value::String(subtitle.clone());
+        }
+        object
     }
 
     /// 不支持：None  
@@ -1525,7 +1583,16 @@ impl Audio {
             .as_secs();
 
         let with_file_size = |mut audio: Audio| {
-            audio.file_size = Some(file_metadata.len());
+            let size = file_metadata.len();
+            audio.file_size = Some(size);
+            if audio.bitrate.unwrap_or(0) == 0 && audio.duration > 0 {
+                audio.bitrate = effective_bitrate_kbps(
+                    None,
+                    None,
+                    Some(size),
+                    u128::from(audio.duration) * 1000,
+                );
+            }
             audio
         };
 
@@ -1640,6 +1707,7 @@ impl Audio {
         let disc_number = tags
             .iter()
             .find_map(|tag| tag.disk().filter(|value| *value > 0));
+        let disc_subtitle = disc_subtitle_from_tags(&tags);
         let uses_id3v1 = [title_source, artist_source, album_source]
             .into_iter()
             .flatten()
@@ -1658,9 +1726,15 @@ impl Audio {
             classification_version: CLASSIFICATION_VERSION,
             track,
             disc_number,
+            disc_subtitle,
             duration: properties.duration().as_secs(),
             duration_version: DURATION_VERSION,
-            bitrate: properties.audio_bitrate(),
+            bitrate: effective_bitrate_kbps(
+                properties.audio_bitrate(),
+                properties.overall_bitrate(),
+                None,
+                properties.duration().as_millis(),
+            ),
             sample_rate: properties.sample_rate(),
             language: first_tag_text_with_source(&tags, &ItemKey::Language).map(|(value, _)| value),
             file_size: None,
@@ -1743,9 +1817,13 @@ impl Audio {
             track: Some(music_properties.TrackNumber()?),
             // MusicProperties has no disc accessor; unknown stays unknown.
             disc_number: None,
+            disc_subtitle: None,
             duration: duration.as_secs(),
             duration_version: DURATION_VERSION,
-            bitrate: Some(music_properties.Bitrate()? / 1000),
+            bitrate: {
+                let win_kbps = music_properties.Bitrate()? / 1000;
+                (win_kbps > 0).then_some(win_kbps)
+            },
             sample_rate: None,
             language: None,
             file_size: None,
@@ -1996,7 +2074,7 @@ fn looks_like_timed_lyrics(text: &str) -> bool {
             }
             continue;
         }
-        if bytes[cursor] == b'.' {
+        if bytes[cursor] == b'.' || bytes[cursor] == b':' {
             cursor += 1;
             let frac_start = cursor;
             while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
@@ -2631,6 +2709,14 @@ mod tests {
         assert!(is_supported_audio_path(Path::new(".hidden.mp3")));
         assert!(is_supported_audio_path(Path::new("...intro.flac")));
         assert!(is_supported_audio_path(Path::new("normal._remix.mp3")));
+    }
+
+    #[test]
+    fn timed_lyrics_detector_recognizes_colon_centiseconds() {
+        assert!(looks_like_timed_lyrics("[00:12:34] Colon LRC line"));
+        assert!(looks_like_timed_lyrics("[01:05.20] Dot LRC line"));
+        assert!(looks_like_timed_lyrics("[02:00] Whole-second LRC line"));
+        assert!(!looks_like_timed_lyrics("Plain unsynced embedded lyrics"));
     }
 
     #[test]
@@ -4791,5 +4877,59 @@ mod tests {
         );
         fs::write(&output, serde_json::to_vec_pretty(&rebuilt).unwrap()).unwrap();
         println!("targeted native metadata reads: {full_reads} / 666");
+    }
+
+    #[test]
+    fn effective_bitrate_falls_back_to_container_or_size_for_opus_and_lossless() {
+        // Explicit audio_bitrate wins when non-zero.
+        assert_eq!(
+            effective_bitrate_kbps(Some(320), Some(325), Some(8_000_000), 200_000),
+            Some(320)
+        );
+        // Zero or missing audio_bitrate (e.g. .opus) uses container overall_bitrate.
+        assert_eq!(
+            effective_bitrate_kbps(None, Some(128), Some(3_200_000), 200_000),
+            Some(128)
+        );
+        assert_eq!(
+            effective_bitrate_kbps(Some(0), Some(96), Some(2_400_000), 200_000),
+            Some(96)
+        );
+        // When both stream and container bitrates are absent, derive from size & duration.
+        // 2,400,000 bytes * 8 bits = 19,200,000 bits over 120,000 ms = 160 kbps.
+        assert_eq!(
+            effective_bitrate_kbps(None, None, Some(2_400_000), 120_000),
+            Some(160)
+        );
+        // Unknown/zero duration or empty file never invents a bitrate.
+        assert_eq!(effective_bitrate_kbps(None, None, Some(2_400_000), 0), None);
+        assert_eq!(effective_bitrate_kbps(None, None, Some(0), 120_000), None);
+    }
+
+    #[test]
+    fn disc_subtitle_reads_set_subtitle_and_vorbis_discsubtitle() {
+        let mut id3 = Tag::new(TagType::Id3v2);
+        assert_eq!(disc_subtitle_from_tags(&[&id3]), None);
+        id3.insert_text(ItemKey::SetSubtitle, "Acoustic Side".to_string());
+        assert_eq!(
+            disc_subtitle_from_tags(&[&id3]).as_deref(),
+            Some("Acoustic Side")
+        );
+
+        let mut comments = lofty::ogg::VorbisComments::default();
+        comments.insert("DISCSUBTITLE".into(), "Live Bonus Disc".into());
+        let vorbis_standard: Tag = comments.into();
+        assert_eq!(
+            disc_subtitle_from_tags(&[&vorbis_standard]).as_deref(),
+            Some("Live Bonus Disc")
+        );
+
+        let mut spaced_comments = lofty::ogg::VorbisComments::default();
+        spaced_comments.insert("Disc Subtitle".into(), " Orchestral Side ".into());
+        let vorbis_alias: Tag = spaced_comments.into();
+        assert_eq!(
+            disc_subtitle_from_tags(&[&vorbis_alias]).as_deref(),
+            Some("Orchestral Side")
+        );
     }
 }

@@ -169,7 +169,7 @@ class PlaybackSettingsPanel extends StatelessWidget {
     final theme = Theme.of(context);
     return SettingsSurface(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SettingsHeader(
               title: ui("播放速度"),
@@ -193,18 +193,41 @@ class PlaybackSettingsPanel extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           if (onPitchChanged != null) ...[
-            SettingsHeader(
-                title: ui('升降调'),
-                icon: Icons.music_note_outlined,
-                subtitle: ui(pitchAvailable
-                    ? '独立调整音高，速度和歌词时间不变；选择原调可恢复。'
-                    : '当前安装缺少升降调组件，仍可正常播放。')),
-            const SizedBox(height: 12),
-            PlaybackPitchControl(
-                pitch: playbackPitch,
-                enabled: pitchAvailable && !changingOutput,
-                onChanged: onPitchChanged!),
+            const Divider(height: 1),
             const SizedBox(height: 16),
+            LayoutBuilder(builder: (context, constraints) {
+              final pitchHeader = SettingsHeader(
+                  title: ui('升降调'),
+                  icon: Icons.music_note_outlined,
+                  subtitle: ui(pitchAvailable
+                      ? '独立调整音高，速度和歌词时间不变；选择原调可恢复。'
+                      : '当前安装缺少升降调组件，仍可正常播放。'));
+              final pitchControl = PlaybackPitchControl(
+                  pitch: playbackPitch,
+                  enabled: pitchAvailable && !changingOutput,
+                  onChanged: onPitchChanged!);
+              final scale = MediaQuery.textScalerOf(context).scale(1);
+              if (constraints.maxWidth >= 540 * scale) {
+                return Row(
+                  children: [
+                    Expanded(child: pitchHeader),
+                    const SizedBox(width: 16),
+                    pitchControl,
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  pitchHeader,
+                  const SizedBox(height: 12),
+                  pitchControl,
+                ],
+              );
+            }),
+            const SizedBox(height: 16),
+            const Divider(height: 1),
+            const SizedBox(height: 8),
           ],
           SettingsSwitchTile(
             surface: false,

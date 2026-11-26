@@ -49,6 +49,7 @@ class LyricLineDisplayArea extends StatelessWidget {
         translationFontSize: textSettings.translationFontSize,
         lyricLetterSpacing: textSettings.lyricLetterSpacing,
         showJapaneseReading: textSettings.value.showJapaneseReading,
+        showEnglishPhonetics: textSettings.value.showEnglishPhonetics,
         textOpacity: textSettings.value.textOpacity,
         strokeEnabled: textSettings.value.strokeEnabled,
       ),
@@ -70,6 +71,7 @@ class DesktopLyricLineContent extends StatelessWidget {
     this.translationFontSize = 18,
     this.lyricLetterSpacing = 0,
     this.showJapaneseReading = true,
+    this.showEnglishPhonetics = false,
     this.textOpacity = 1,
     this.strokeEnabled = false,
   });
@@ -84,6 +86,7 @@ class DesktopLyricLineContent extends StatelessWidget {
   final double translationFontSize;
   final double lyricLetterSpacing;
   final bool showJapaneseReading;
+  final bool showEnglishPhonetics;
   final double textOpacity;
   final bool strokeEnabled;
 
@@ -95,6 +98,7 @@ class DesktopLyricLineContent extends StatelessWidget {
         : detailedLine!.translation;
     final romanization = detailedLine?.romanization;
     final japaneseReading = detailedLine?.japaneseReading;
+    final englishPhonetic = detailedLine?.englishPhonetic;
     final text =
         content.trim().isEmpty &&
             (detailedLine?.lengthMilliseconds ??
@@ -139,7 +143,10 @@ class DesktopLyricLineContent extends StatelessWidget {
       LyricContentVisibility visibility, {
       double? verticalColumnWidth,
     }) {
-      final readingVisibility = visibility.japaneseReading;
+      final readingVisibility = math.max(
+        visibility.japaneseReading,
+        visibility.englishPhonetic,
+      );
       Widget column(Widget child) => verticalColumnWidth == null
           ? child
           : SizedBox(
@@ -186,8 +193,10 @@ class DesktopLyricLineContent extends StatelessWidget {
               unplayedColor: color.withValues(alpha: highContrast ? .85 : .38),
               strokeColor: strokeColor,
               words: detailedLine?.words ?? const [],
-              rubySpans: visibility.japaneseReadingSpans,
+              rubySpans: visibility.rubySpans,
               rubyVisibility: readingVisibility,
+              japaneseRubyVisibility: visibility.japaneseReading,
+              phoneticRubyVisibility: visibility.englishPhonetic,
               reducedMotion: reduced,
             ),
           ),
@@ -246,6 +255,8 @@ class DesktopLyricLineContent extends StatelessWidget {
     final lyricColumns = LyricContentReveal(
       japaneseReadingSource: strictSource,
       japaneseReadingSpans: detailedLine?.japaneseReadingSpans ?? const [],
+      englishPhoneticSource: strictSource,
+      englishPhoneticSpans: detailedLine?.englishPhoneticSpans ?? const [],
       key: ValueKey(('desktop-content', strictSource ?? lineKey)),
       timestamp: false,
       romanization: hasRomanization,
@@ -253,6 +264,9 @@ class DesktopLyricLineContent extends StatelessWidget {
       japaneseReading:
           showJapaneseReading &&
           (detailedLine?.japaneseReadingSpans.isNotEmpty ?? false),
+      englishPhonetic:
+          showEnglishPhonetics &&
+          (detailedLine?.englishPhoneticSpans.isNotEmpty ?? false),
       reducedMotion: reduced,
       builder: (context, visibility) => contents(visibility),
     );
@@ -261,6 +275,8 @@ class DesktopLyricLineContent extends StatelessWidget {
         if (hasRomanization) romanization!,
         if (showJapaneseReading && japaneseReading?.trim().isNotEmpty == true)
           japaneseReading!,
+        if (showEnglishPhonetics && englishPhonetic?.trim().isNotEmpty == true)
+          englishPhonetic!,
         text,
         if (hasTranslation) translation!,
       ].join('\n'),

@@ -5,7 +5,9 @@ import 'dart:convert';
 
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/component/app_content_transition.dart';
 import 'package:dan_player/component/app_entrance.dart';
+import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/library/library_auto_refresh.dart';
 import 'package:dan_player/library/library_health.dart';
@@ -105,8 +107,6 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
         }
       }
     } catch (error) {
-      // Root labels are optional health metadata. Leave index recovery to the
-      // existing scanner/loader instead of failing on this auxiliary read.
       LOGGER.w('[library health roots] $error');
     }
     String? failure;
@@ -132,8 +132,6 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
           !await index.exists()) {
         rethrow;
       }
-      // Rust deliberately left the old complete snapshot intact. Open it so
-      // an unplugged source doesn't prevent access to playlists and settings.
       _usingCachedIndex = true;
       if (cancelled) {
         failure = null;
@@ -158,8 +156,6 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
     try {
       StartupProgress.instance.advance(StartupStage.loadingLibrary);
       await AudioLibrary.initFromIndex();
-      // 联网曲目必须先并入总乐库，随后统一迁移的歌单和播放会话才能正确解析
-      // online:// 稳定标识，不会把它们误判为失效条目。
       await OnlineLibrary.instance.initialize();
       await PlaybackStatistics.instance.initialize();
       StartupProgress.instance.advance(StartupStage.playlists);
@@ -184,8 +180,6 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
       LibraryAutoRefresh.instance.start();
       await _subscription?.cancel();
       StartupProgress.instance.advance(StartupStage.ready);
-      // Warm the session display once after the first usable player frame.
-      // Do not delay session restoration, navigation or playback for this scan.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         unawaited(StatisticsDisplayService.instance.prewarmOnce());
       });
@@ -220,9 +214,14 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
     super.initState();
     updateIndexStream = _scan().asBroadcastStream();
 
+    String? lastLoggedPhase;
     _subscription = updateIndexStream.listen(
       (action) {
-        LOGGER.i("[update index] ${action.progress}: ${action.message}");
+        final phase = action.message;
+        if (phase.isNotEmpty && phase != lastLoggedPhase) {
+          lastLoggedPhase = phase;
+          LOGGER.i('[update index] $phase');
+        }
       },
       onDone: whenIndexUpdated,
       onError: (Object error, StackTrace stackTrace) {
@@ -244,22 +243,39 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final error = _error;
 
-    return SizedBox(
-      width: 400.0,
+    return Container(
+      width: 420.0,
+      padding: const EdgeInsets.all(28),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        borderRadius: AppShape.dialogRadius,
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: 0.44),
+        ),
+      ),
       child: error != null
           ? Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.error_outline, color: scheme.error, size: 36.0),
-                const SizedBox(height: 12.0),
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: scheme.errorContainer.withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(Icons.error_outline,
+                      color: scheme.onErrorContainer, size: 28.0),
+                ),
+                const SizedBox(height: 14.0),
                 Text(
                   ui("音乐索引无法读取"),
-                  style: TextStyle(
+                  style: theme.textTheme.titleLarge?.copyWith(
                     color: scheme.onSurface,
-                    fontSize: 18.0,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -271,7 +287,7 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
                   textAlign: TextAlign.center,
                   style: TextStyle(color: scheme.onSurfaceVariant),
                 ),
-                const SizedBox(height: 16.0),
+                const SizedBox(height: 18.0),
                 FilledButton.icon(
                   onPressed: () => context.go(app_paths.WELCOMING_PAGE),
                   icon: const Icon(Icons.folder_open),
@@ -282,22 +298,47 @@ class _UpdatingStateViewState extends State<UpdatingStateView> {
           : StreamBuilder(
               stream: updateIndexStream,
               builder: (context, snapshot) {
+                final statusLabel = _task?.phase == LibraryRefreshPhase.cancelling
+                    ? ui('正在取消扫描')
+                    : snapshot.data?.message == 'INDEX_PHASE_COMMITTING'
+                        ? ui('正在提交曲库')
+                        : ui("正在检查音乐索引");
                 return Column(
+                  mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    LinearProgressIndicator(
-                      value: snapshot.data?.progress,
-                      borderRadius: BorderRadius.circular(2.0),
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: scheme.primaryContainer.withValues(alpha: 0.72),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.library_music_outlined,
+                        color: scheme.onPrimaryContainer,
+                        size: 24,
+                      ),
                     ),
-                    const SizedBox(height: 8.0),
-                    Text(
-                      _task?.phase == LibraryRefreshPhase.cancelling
-                          ? ui('正在取消扫描')
-                          : snapshot.data?.message == 'INDEX_PHASE_COMMITTING'
-                              ? ui('正在提交曲库')
-                              : ui("正在检查音乐索引"),
-                      style: TextStyle(color: scheme.onSurface),
+                    const SizedBox(height: 14),
+                    AppContentTransition(
+                      identity: statusLabel,
+                      child: Text(
+                        statusLabel,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: scheme.onSurface,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        minHeight: 6,
+                        value: snapshot.data?.progress,
+                      ),
                     ),
                     if (_task != null && !_task!.isTerminal) ...[
                       const SizedBox(height: 16),

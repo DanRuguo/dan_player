@@ -524,7 +524,7 @@ class _ResourceChoice<T> extends StatelessWidget {
         const SizedBox(height: 6),
         AppMenuAnchor(
             style: const MenuStyle(
-                shape: WidgetStatePropertyAll(AppShape.control)),
+                shape: WidgetStatePropertyAll(AppShape.surface)),
             menuChildren: [
               for (final option in values)
                 MenuItemButton(
@@ -541,15 +541,21 @@ class _ResourceChoice<T> extends StatelessWidget {
             builder: (context, menu, _) => OutlinedButton(
                 key: ValueKey(controlKey),
                 style: OutlinedButton.styleFrom(
-                    shape: AppShape.control,
+                    shape: AppShape.pill,
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12)),
+                        horizontal: 16, vertical: 11)),
                 onPressed: () => menu.isOpen ? menu.close() : menu.open(),
-                child: Row(children: [
-                  Expanded(child: Text(label(value))),
-                  const SizedBox(width: 8),
-                  const Icon(Icons.expand_more, size: 20)
-                ])))
+                child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Flexible(
+                          child: Text(label(value),
+                              textAlign: TextAlign.center,
+                              overflow: TextOverflow.ellipsis)),
+                      const SizedBox(width: 6),
+                      const Icon(Icons.expand_more_rounded, size: 20)
+                    ])))
       ]);
 }
 

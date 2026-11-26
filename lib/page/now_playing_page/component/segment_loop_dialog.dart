@@ -1,5 +1,8 @@
-import 'package:dan_player/component/app_toolbar_style.dart';
+import 'package:dan_player/component/app_dialog_actions.dart';
+import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_presentation.dart';
+import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/component/app_toolbar_style.dart';
 import 'package:dan_player/page/now_playing_page/component/detail_progress_slider.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:dan_player/utils.dart';
@@ -38,25 +41,55 @@ class _SegmentLoopDialogState extends State<SegmentLoopDialog> {
         service.isChangingOutput
       ]),
       builder: (context, _) {
+        final theme = Theme.of(context);
+        final scheme = theme.colorScheme;
         final loop = service.segmentLoop;
         final available = service.canUseSegmentLoop;
         return AlertDialog(
-          icon: Icon(Symbols.repeat,
-              color: Theme.of(context).colorScheme.primary),
-          title: Text(ui('A-B 片段循环'), textAlign: TextAlign.center),
+          title: AppDialogTitle(
+            ui('A-B 片段循环'),
+            leading: Icon(Symbols.repeat, color: scheme.primary),
+          ),
           content: SizedBox(
-              width: 480,
+              width: 488,
               child: SingleChildScrollView(
                   child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                    Text(service.nowPlaying?.displayTitle ?? ui('尚未选择歌曲'),
-                        maxLines: 2, overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 12),
-                    Text(ui(available
-                        ? '播放到需要的位置，分别标记 A 和 B；两点至少间隔 1 秒。'
-                        : '请先加载一首本地歌曲，再设置片段循环。')),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: scheme.surfaceContainerLow,
+                        borderRadius: AppShape.surfaceRadius,
+                        border: Border.all(
+                            color:
+                                scheme.outlineVariant.withValues(alpha: .42)),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              service.nowPlaying?.displayTitle ?? ui('尚未选择歌曲'),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              ui(available
+                                  ? '播放到需要的位置，分别标记 A 和 B；两点至少间隔 1 秒。'
+                                  : '请先加载一首本地歌曲，再设置片段循环。'),
+                              style: theme.textTheme.bodySmall
+                                  ?.copyWith(color: scheme.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                     const SizedBox(height: 16),
                     _SegmentPosition(
                         key: ValueKey(service.nowPlaying?.path),
@@ -89,7 +122,7 @@ class _SegmentLoopDialogState extends State<SegmentLoopDialog> {
                           icon: const Icon(Symbols.last_page),
                           label: Text(ui('标记 B：{0}', [_time(loop.end)]))),
                     ]),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 18),
                     _SegmentControlPair(children: [
                       _PracticeField(
                           label: ui('总次数（留空无限）'),
@@ -111,10 +144,11 @@ class _SegmentLoopDialogState extends State<SegmentLoopDialog> {
                                     (n != null && n >= 2 && n <= 999));
                                 if (!_roundsValid) loop.setEnabled(false);
                                 if (v.isEmpty ||
-                                    (n != null && n >= 2 && n <= 999))
+                                    (n != null && n >= 2 && n <= 999)) {
                                   loop.configurePractice(
                                       rounds: n,
                                       interval: loop.intervalSeconds);
+                                }
                               })),
                       _PracticeField(
                           label: ui('轮间间隔（0–10 秒）'),
@@ -143,9 +177,10 @@ class _SegmentLoopDialogState extends State<SegmentLoopDialog> {
                                 if (n != null &&
                                     n.isFinite &&
                                     n >= 0 &&
-                                    n <= 10)
+                                    n <= 10) {
                                   loop.configurePractice(
                                       rounds: loop.totalRounds, interval: n);
+                                }
                               })),
                     ]),
                     const SizedBox(height: 12),
@@ -161,15 +196,20 @@ class _SegmentLoopDialogState extends State<SegmentLoopDialog> {
                             ? service.setSegmentLoopEnabled
                             : null),
                     Text(ui('切换歌曲会清除标记；手动跳到区间外会关闭循环。'),
-                        style: Theme.of(context).textTheme.bodySmall),
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: scheme.onSurfaceVariant)),
                   ]))),
           actions: [
-            TextButton(
-                onPressed: loop.start != null ? loop.clear : null,
-                child: Text(ui('清除标记'))),
-            FilledButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: Text(ui('完成'))),
+            AppDialogActions(
+              children: [
+                TextButton(
+                    onPressed: loop.start != null ? loop.clear : null,
+                    child: Text(ui('清除标记'))),
+                FilledButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text(ui('完成'))),
+              ],
+            ),
           ],
         );
       },
@@ -189,8 +229,6 @@ class _SegmentPosition extends StatelessWidget {
         positions: service.positionStream,
         readPosition: () => service.position,
         duration: service.length,
-        // The same file can be opened again while this dialog stays mounted.
-        // Reuse the timeline's pointer cancellation and newer-seek ownership.
         trackIdentity: (service.nowPlaying?.path, service.playbackSessionToken),
         seekRevision: service.manualSeekRevision,
         onSeek: service.seek,

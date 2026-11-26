@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:dan_player/component/app_entrance.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:desktop_lyric/ui_language.dart';
@@ -21,28 +23,69 @@ class SettingsSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
     return Material(
       color: scheme.surfaceContainerLow,
-      shape: AppShape.surface.copyWith(
+      surfaceTintColor: Colors.transparent,
+      shape: AppShape.card.copyWith(
         side: BorderSide(
-            color: MediaQuery.maybeHighContrastOf(context) == true
-                ? scheme.outline
-                : scheme.outlineVariant.withValues(alpha: .45)),
+          color: MediaQuery.maybeHighContrastOf(context) == true
+              ? scheme.outline
+              : scheme.outlineVariant.withValues(alpha: isDark ? .36 : .44),
+        ),
       ),
       clipBehavior: Clip.antiAlias,
       child: ListTileTheme(
         data: ListTileTheme.of(context).copyWith(
           contentPadding: rowPadding,
           horizontalTitleGap: 12,
-          minLeadingWidth: 24,
+          minLeadingWidth: 36,
           iconColor: scheme.primary,
           textColor: scheme.onSurface,
-          titleTextStyle:
-              theme.textTheme.titleMedium?.copyWith(color: scheme.onSurface),
+          titleTextStyle: theme.textTheme.titleMedium?.copyWith(
+            color: scheme.onSurface,
+            fontWeight: FontWeight.w600,
+          ),
           subtitleTextStyle: theme.textTheme.bodyMedium
               ?.copyWith(color: scheme.onSurfaceVariant),
         ),
         child: Padding(padding: padding, child: child),
+      ),
+    );
+  }
+}
+
+class _SettingsIconBadge extends StatelessWidget {
+  const _SettingsIconBadge({
+    required this.icon,
+    this.enabled = true,
+  });
+
+  final IconData icon;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: enabled
+            ? scheme.primaryContainer.withValues(alpha: isDark ? .44 : .68)
+            : scheme.surfaceContainerHighest.withValues(alpha: .48),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: SizedBox.square(
+        dimension: 36,
+        child: Center(
+          child: Icon(
+            icon,
+            size: 20,
+            color: enabled
+                ? scheme.onPrimaryContainer
+                : scheme.onSurface.withValues(alpha: .38),
+          ),
+        ),
       ),
     );
   }
@@ -63,28 +106,38 @@ class SettingsHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SizedBox.square(
-          dimension: 24,
-          child: Icon(icon, size: 22, color: theme.colorScheme.primary)),
-      const SizedBox(width: 12),
-      Expanded(
+    return Row(
+      crossAxisAlignment:
+          subtitle == null ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+      children: [
+        _SettingsIconBadge(icon: icon),
+        const SizedBox(width: 12),
+        Expanded(
           child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-            Text(title,
-                style: theme.textTheme.titleMedium
-                    ?.copyWith(color: theme.colorScheme.onSurface)),
-            if (subtitle != null) ...[
-              const SizedBox(height: 4),
-              Text(subtitle!,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                title,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: theme.colorScheme.onSurface,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (subtitle != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  subtitle!,
                   style: theme.textTheme.bodyMedium?.copyWith(
-                      color:
-                          subtitleColor ?? theme.colorScheme.onSurfaceVariant)),
+                    color: subtitleColor ?? theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
             ],
-          ])),
-    ]);
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -149,16 +202,7 @@ class SettingsSwitchTile extends StatelessWidget {
       key: controlKey,
       title: title,
       subtitle: subtitle,
-      secondary: SizedBox.square(
-          dimension: 24,
-          child: Icon(icon,
-              size: 22,
-              color: onChanged == null
-                  ? Theme.of(context)
-                      .colorScheme
-                      .onSurface
-                      .withValues(alpha: .38)
-                  : Theme.of(context).colorScheme.primary)),
+      secondary: _SettingsIconBadge(icon: icon, enabled: onChanged != null),
       contentPadding: contentPadding,
       value: value,
       onChanged: onChanged,
@@ -166,7 +210,9 @@ class SettingsSwitchTile extends StatelessWidget {
       materialTapTargetSize: MaterialTapTargetSize.padded,
     );
     final alignedRow = ListTileTheme.merge(
-      titleAlignment: ListTileTitleAlignment.top,
+      titleAlignment: subtitle == null
+          ? ListTileTitleAlignment.center
+          : ListTileTitleAlignment.top,
       child: row,
     );
     return surface
@@ -207,22 +253,33 @@ class _SettingsTileState extends State<SettingsTile> {
       final label = icon != null
           ? SettingsHeader(
               title: description, icon: icon, subtitle: widget.subtitle)
-          : Text(description, style: Theme.of(context).textTheme.titleMedium);
-      if (constraints.maxWidth < 560 ||
-          MediaQuery.textScalerOf(context).scale(1) > 1.4) {
+          : Text(
+              description,
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            );
+      final scale = MediaQuery.textScalerOf(context).scale(1);
+      if (constraints.maxWidth < 540 * math.min(scale, 1.35) || scale > 1.5) {
         return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
               label,
               const SizedBox(height: 10),
-              Align(alignment: Alignment.centerRight, child: action)
+              Align(alignment: AlignmentDirectional.centerEnd, child: action)
             ]);
       }
       return Row(children: [
         Expanded(child: label),
         const SizedBox(width: 16),
-        action
+        ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: math.max(220.0, constraints.maxWidth - 210.0),
+          ),
+          child: action,
+        ),
       ]);
     });
     return AppEntrance(

@@ -1,14 +1,16 @@
 import 'dart:math' as math;
+
 import 'package:dan_player/app_settings.dart';
-import 'package:dan_player/utils.dart';
-import 'package:dan_player/hotkeys_helper.dart';
-import 'package:flex_color_picker/flex_color_picker.dart';
-import 'package:dan_player/component/app_shape.dart';
-import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_dialog_actions.dart';
+import 'package:dan_player/component/app_dialog_title.dart';
+import 'package:dan_player/component/app_motion.dart';
+import 'package:dan_player/component/app_shape.dart';
+import 'package:dan_player/hotkeys_helper.dart';
+import 'package:dan_player/utils.dart';
+import 'package:desktop_lyric/ui_language.dart';
+import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
-import 'package:desktop_lyric/ui_language.dart';
 
 class ThemePickerDialog extends StatefulWidget {
   const ThemePickerDialog({super.key});
@@ -56,6 +58,11 @@ class _ThemePickerDialogState extends State<ThemePickerDialog> {
       const Color(0xffb56b45),
       const Color(0xff7a893f),
     };
+    final swatchDuration = AppMotion.duration(
+      context,
+      MotionKind.feedback,
+      AppMotion.quick,
+    );
     return Theme(
       data: theme.copyWith(colorScheme: scheme),
       child: AlertDialog(
@@ -64,29 +71,35 @@ class _ThemePickerDialogState extends State<ThemePickerDialog> {
         title: AppDialogTitle(
           ui("主题选择器"),
           leading: Icon(Symbols.palette, color: scheme.primary),
-          style: theme.textTheme.titleLarge?.copyWith(color: scheme.onSurface),
+          style: theme.textTheme.titleLarge?.copyWith(
+            color: scheme.onSurface,
+            fontWeight: FontWeight.w700,
+          ),
         ),
         content: SizedBox(
-          width: 376,
+          width: 384,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Container(
+              AnimatedContainer(
                 key: const ValueKey('theme-color-preview'),
+                duration: swatchDuration,
+                curve: AppMotion.standardCurve,
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: scheme.surfaceContainerLow,
-                  borderRadius: AppShape.controlRadius,
-                  border: Border.all(color: scheme.outlineVariant),
+                  borderRadius: AppShape.cardRadius,
+                  border: Border.all(
+                      color: scheme.outlineVariant.withValues(alpha: .46)),
                 ),
                 child: Row(children: [
                   Container(
-                    width: 42,
-                    height: 42,
+                    width: 44,
+                    height: 44,
                     decoration: BoxDecoration(
                         color: scheme.primaryContainer,
-                        borderRadius: AppShape.smallRadius),
+                        borderRadius: BorderRadius.circular(14)),
                     child: Icon(Symbols.music_note,
                         color: scheme.onPrimaryContainer),
                   ),
@@ -98,14 +111,14 @@ class _ThemePickerDialogState extends State<ThemePickerDialog> {
                       Text('Dan Player',
                           style: theme.textTheme.titleMedium?.copyWith(
                               color: scheme.primary,
-                              fontWeight: FontWeight.w600)),
+                              fontWeight: FontWeight.w700)),
                       Text(ui('主题预览'),
                           style: theme.textTheme.bodySmall
                               ?.copyWith(color: scheme.onSurfaceVariant)),
                     ],
                   )),
                   const SizedBox(width: 8),
-                  Icon(Symbols.play_circle, color: scheme.primary, size: 30),
+                  Icon(Symbols.play_circle, color: scheme.primary, size: 32),
                 ]),
               ),
               const SizedBox(height: 14),
@@ -118,7 +131,7 @@ class _ThemePickerDialogState extends State<ThemePickerDialog> {
                   shouldUpdate: _updateWheel,
                   wheelWidth: 14,
                   wheelSquarePadding: 8,
-                  wheelSquareBorderRadius: 8,
+                  wheelSquareBorderRadius: 12,
                   onChanged: (color) => _chooseColor(color, fromWheel: true),
                   onWheel: (_) {},
                 ),
@@ -149,14 +162,16 @@ class _ThemePickerDialogState extends State<ThemePickerDialog> {
                     labelStyle: TextStyle(color: scheme.onSurfaceVariant),
                     floatingLabelStyle: TextStyle(color: scheme.primary),
                     prefixIcon: Icon(Symbols.tag, color: scheme.primary),
-                    border: AppShape.inputBorder,
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(color: scheme.outlineVariant)),
                     enabledBorder: OutlineInputBorder(
-                        borderRadius: AppShape.controlRadius,
+                        borderRadius: BorderRadius.circular(14),
                         borderSide: BorderSide(color: scheme.outlineVariant)),
                     focusedBorder: OutlineInputBorder(
-                        borderRadius: AppShape.controlRadius,
+                        borderRadius: BorderRadius.circular(14),
                         borderSide:
-                            BorderSide(color: scheme.primary, width: 2)),
+                            BorderSide(color: scheme.primary, width: 1.8)),
                     errorText: _invalidHex ? ui('请输入 #RRGGBB 格式的颜色') : null,
                     errorMaxLines: 3,
                   ),
@@ -164,10 +179,11 @@ class _ThemePickerDialogState extends State<ThemePickerDialog> {
               ),
               const SizedBox(height: 14),
               Text(ui('快速选色'),
-                  style: theme.textTheme.labelLarge
-                      ?.copyWith(color: scheme.onSurfaceVariant)),
+                  style: theme.textTheme.labelLarge?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
-              Wrap(spacing: 6, runSpacing: 6, children: [
+              Wrap(spacing: 8, runSpacing: 8, children: [
                 for (final color in presets)
                   Tooltip(
                     message: color == _originalColor
@@ -181,26 +197,28 @@ class _ThemePickerDialogState extends State<ThemePickerDialog> {
                           : color.toRGBHexString(),
                       child: InkWell(
                         key: ValueKey('theme-preset-${color.toARGB32()}'),
-                        borderRadius: AppShape.smallRadius,
+                        borderRadius: AppShape.pillRadius,
                         onTap: () => _chooseColor(color),
-                        child: Container(
-                          width: 36,
-                          height: 36,
-                          padding: const EdgeInsets.all(4),
+                        child: AnimatedContainer(
+                          duration: swatchDuration,
+                          curve: AppMotion.standardCurve,
+                          width: 38,
+                          height: 38,
+                          padding: const EdgeInsets.all(3.5),
                           decoration: BoxDecoration(
-                            borderRadius: AppShape.smallRadius,
+                            shape: BoxShape.circle,
                             border: Border.all(
                                 width: 2,
                                 color: selectedColor == color
                                     ? scheme.primary
-                                    : Colors.transparent),
+                                    : scheme.outlineVariant
+                                        .withValues(alpha: .35)),
                           ),
                           child: DecoratedBox(
                             decoration: BoxDecoration(
-                                color: color,
-                                borderRadius: BorderRadius.circular(5)),
+                                color: color, shape: BoxShape.circle),
                             child: selectedColor == color
-                                ? Icon(Icons.check,
+                                ? Icon(Icons.check_rounded,
                                     size: 18,
                                     color: ThemeData.estimateBrightnessForColor(
                                                 color) ==

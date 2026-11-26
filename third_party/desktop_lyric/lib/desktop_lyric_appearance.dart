@@ -1,7 +1,7 @@
 /// Shared, immutable preferences. Only the player writes these to disk.
 class DesktopLyricAppearance {
   static const defaults = DesktopLyricAppearance._(
-      22, 18, null, 0, 1, false, false, 8, 56, 14, false, 0, true);
+      22, 18, null, 0, 1, false, false, 8, 56, 14, false, 0, true, false);
 
   const DesktopLyricAppearance._(
       this.lyricFontSize,
@@ -16,7 +16,8 @@ class DesktopLyricAppearance {
       this.taskbarMinimumFontSize,
       this.taskbarTranslation,
       this.lyricLetterSpacing,
-      this.showJapaneseReading);
+      this.showJapaneseReading,
+      this.showEnglishPhonetics);
 
   final double lyricFontSize;
   final double translationFontSize;
@@ -38,6 +39,9 @@ class DesktopLyricAppearance {
 
   /// Visibility only: hiding generated readings preserves their source/cache.
   final bool showJapaneseReading;
+
+  /// Visibility only: hiding generated English IPA phonetics preserves cache.
+  final bool showEnglishPhonetics;
 
   static bool _number(Object? value, double min, double max) =>
       value is num && value.isFinite && value >= min && value <= max;
@@ -67,6 +71,9 @@ class DesktopLyricAppearance {
       raw['showJapaneseReading'] is bool
           ? raw['showJapaneseReading'] as bool
           : defaults.showJapaneseReading,
+      raw['showEnglishPhonetics'] is bool
+          ? raw['showEnglishPhonetics'] as bool
+          : defaults.showEnglishPhonetics,
     );
   }
 
@@ -92,7 +99,9 @@ class DesktopLyricAppearance {
         (raw.containsKey('lyricLetterSpacing') &&
             !_number(raw['lyricLetterSpacing'], 0, 12)) ||
         (raw.containsKey('showJapaneseReading') &&
-            raw['showJapaneseReading'] is! bool)) {
+            raw['showJapaneseReading'] is! bool) ||
+        (raw.containsKey('showEnglishPhonetics') &&
+            raw['showEnglishPhonetics'] is! bool)) {
       return null;
     }
     return DesktopLyricAppearance.fromJson(raw);
@@ -112,7 +121,8 @@ class DesktopLyricAppearance {
       double? taskbarMinimumFontSize,
       bool? taskbarTranslation,
       double? lyricLetterSpacing,
-      bool? showJapaneseReading}) {
+      bool? showJapaneseReading,
+      bool? showEnglishPhonetics}) {
     final map = {
       'lyricFontSize': lyricFontSize ?? this.lyricFontSize,
       'translationFontSize': translationFontSize ?? this.translationFontSize,
@@ -128,6 +138,8 @@ class DesktopLyricAppearance {
       'taskbarTranslation': taskbarTranslation ?? this.taskbarTranslation,
       'lyricLetterSpacing': lyricLetterSpacing ?? this.lyricLetterSpacing,
       'showJapaneseReading': showJapaneseReading ?? this.showJapaneseReading,
+      'showEnglishPhonetics':
+          showEnglishPhonetics ?? this.showEnglishPhonetics,
     };
     return tryFromJson(map) ??
         (throw ArgumentError('Invalid lyric appearance'));
@@ -147,6 +159,7 @@ class DesktopLyricAppearance {
         'taskbarTranslation': taskbarTranslation,
         'lyricLetterSpacing': lyricLetterSpacing,
         'showJapaneseReading': showJapaneseReading,
+        'showEnglishPhonetics': showEnglishPhonetics,
       };
 
   @override
@@ -164,7 +177,8 @@ class DesktopLyricAppearance {
       taskbarMinimumFontSize == other.taskbarMinimumFontSize &&
       taskbarTranslation == other.taskbarTranslation &&
       lyricLetterSpacing == other.lyricLetterSpacing &&
-      showJapaneseReading == other.showJapaneseReading;
+      showJapaneseReading == other.showJapaneseReading &&
+      showEnglishPhonetics == other.showEnglishPhonetics;
   @override
   int get hashCode => Object.hash(
       lyricFontSize,
@@ -179,5 +193,6 @@ class DesktopLyricAppearance {
       taskbarMinimumFontSize,
       taskbarTranslation,
       lyricLetterSpacing,
-      showJapaneseReading);
+      showJapaneseReading,
+      showEnglishPhonetics);
 }

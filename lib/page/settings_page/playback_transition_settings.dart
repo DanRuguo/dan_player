@@ -118,7 +118,6 @@ class _PlaybackTransitionSettingsState extends State<PlaybackTransitionSettings>
                       action: AppSegmentedControl<PlaybackTransitionMode>(
                           key: const ValueKey('playback-transition-mode'),
                           value: preferences.mode,
-                          maxWidth: 420,
                           wrapCompactLabel: true,
                           semanticLabel: ui('歌曲过渡'),
                           options: [

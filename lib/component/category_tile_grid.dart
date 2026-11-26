@@ -24,6 +24,7 @@ import 'package:dan_player/library/category_cover_store.dart';
 import 'package:dan_player/library/cover_cache.dart';
 import 'package:dan_player/library/music_categories.dart';
 import 'package:desktop_lyric/ui_language.dart';
+import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'package:flutter/material.dart';
 
 class CategoryTileGrid extends StatefulWidget {
@@ -317,6 +318,7 @@ class _CategoryTileState extends State<_CategoryTile> {
   Offset? _menuPosition;
   Object? _request;
   Future<ImageProvider?>? _artwork;
+  ImageProvider? _initialArtwork;
   int? _coverGeneration;
   @override
   void initState() {
@@ -339,6 +341,29 @@ class _CategoryTileState extends State<_CategoryTile> {
   void dispose() {
     CoverCache.instance.changes.removeListener(_coverChanged);
     super.dispose();
+  }
+
+  ({bool hit, ImageProvider? provider}) _peekSync(
+      MusicCategoryGroup group, ArtworkSize target) {
+    final customPeek = widget.covers.peekImageFor(group);
+    if (!customPeek.hit) return (hit: false, provider: null);
+    final customProvider = customPeek.provider;
+    if (customProvider != null) {
+      final animated = mayAnimateArtwork(customProvider);
+      final source = customProvider is AnimatedArtworkSource
+          ? customProvider.source
+          : customProvider;
+      ImageProvider wrapped = ArtworkImageProvider(
+        source,
+        target,
+        revision: widget.covers.coverIdFor(group),
+      );
+      if (animated) wrapped = AnimatedArtworkSource(wrapped);
+      return (hit: true, provider: wrapped);
+    }
+    final audio = group.coverAudio;
+    if (audio == null) return (hit: true, provider: null);
+    return audio.peekArtworkForSize(target);
   }
 
   Future<ImageProvider?> _load(
@@ -392,7 +417,14 @@ class _CategoryTileState extends State<_CategoryTile> {
       final request = (source as Object, target, aspect);
       if (request != _request) {
         _request = request;
-        _artwork = _load(group, target);
+        final syncHit = _peekSync(group, target);
+        if (syncHit.hit) {
+          _initialArtwork = syncHit.provider;
+          _artwork = SynchronousFuture<ImageProvider?>(syncHit.provider);
+        } else {
+          _initialArtwork = null;
+          _artwork = _load(group, target);
+        }
       }
       final placeholder = ColoredBox(
           color: scheme.surfaceContainerHighest,
@@ -499,6 +531,7 @@ class _CategoryTileState extends State<_CategoryTile> {
           ]);
       final cover = RepaintBoundary(
           child: FutureBuilder<ImageProvider?>(
+        initialData: _initialArtwork,
         future: _artwork,
         builder: (_, snapshot) => visual(snapshot.data),
       ));

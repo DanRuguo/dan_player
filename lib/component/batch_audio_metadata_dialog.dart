@@ -1,4 +1,5 @@
 import 'package:dan_player/component/app_dialog_actions.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_presentation.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
@@ -143,18 +144,28 @@ class _BatchAudioMetadataDialogState extends State<BatchAudioMetadataDialog> {
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis))),
                       ])),
-              if (enabled)
-                Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: TextField(
-                        controller: controller,
-                        enabled: !widget.batch.busy,
-                        decoration: InputDecoration(
-                            labelText: ui(label),
-                            prefixIcon: Icon(icon),
-                            hintText: mixed ? ui('多个值') : null,
-                            helperText: ui('空白不会清除标签'),
-                            helperMaxLines: 2))),
+              AnimatedSize(
+                duration: AppMotion.duration(
+                  context,
+                  MotionKind.layout,
+                  AppMotion.quick,
+                ),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topCenter,
+                child: enabled
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: TextField(
+                            controller: controller,
+                            enabled: !widget.batch.busy,
+                            decoration: InputDecoration(
+                                labelText: ui(label),
+                                prefixIcon: Icon(icon),
+                                hintText: mixed ? ui('多个值') : null,
+                                helperText: ui('空白不会清除标签'),
+                                helperMaxLines: 2)))
+                    : const SizedBox.shrink(),
+              ),
             ])));
   }
 
@@ -323,20 +334,29 @@ class _BatchAudioMetadataDialogState extends State<BatchAudioMetadataDialog> {
                                       ],
                                     ]),
                                     if (!batch.previewed) ...[
-                                      if (_titleEdits.contains(target.trackId))
-                                        Padding(
-                                            padding:
-                                                const EdgeInsets.only(top: 14),
-                                            child: TextField(
-                                                controller:
-                                                    _titles[target.trackId],
-                                                enabled: !batch.busy,
-                                                decoration: InputDecoration(
-                                                    labelText: ui('标题'),
-                                                    prefixIcon: const Icon(
-                                                        Symbols.title),
-                                                    border:
-                                                        const OutlineInputBorder()))),
+                                      AnimatedSize(
+                                        duration: AppMotion.duration(
+                                          context,
+                                          MotionKind.layout,
+                                          AppMotion.quick,
+                                        ),
+                                        curve: Curves.easeOutCubic,
+                                        alignment: Alignment.topCenter,
+                                        child: _titleEdits
+                                                .contains(target.trackId)
+                                            ? Padding(
+                                                padding: const EdgeInsets.only(
+                                                    top: 14),
+                                                child: TextField(
+                                                    controller:
+                                                        _titles[target.trackId],
+                                                    enabled: !batch.busy,
+                                                    decoration: InputDecoration(
+                                                        labelText: ui('标题'),
+                                                        prefixIcon: const Icon(
+                                                            Symbols.title))))
+                                            : const SizedBox.shrink(),
+                                      ),
                                       if (!target.audio.canEditLocalFile)
                                         Text(ui(target.audio.isOnline
                                             ? '联网歌曲不能写入本地标签'

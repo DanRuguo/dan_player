@@ -174,7 +174,7 @@ class _PlaylistFolderExportConfirmationState
               padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
               child: Column(
                   mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     AppDialogTitle(ui('导出音乐文件夹'), style: style.headlineSmall),
                     const SizedBox(height: 20),

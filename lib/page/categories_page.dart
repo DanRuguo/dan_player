@@ -3,9 +3,9 @@ import 'package:dan_player/component/adaptive_grid_drag.dart';
 import 'package:dan_player/app_preference.dart';
 import 'package:dan_player/category_presentation.dart';
 import 'package:dan_player/component/category_display_controls.dart';
-import 'package:dan_player/component/app_scrollbar.dart';
 import 'package:dan_player/component/app_horizontal_wheel_region.dart';
 import 'package:dan_player/component/app_content_transition.dart';
+import 'package:dan_player/component/app_motion.dart';
 import 'dart:async';
 
 import 'package:dan_player/component/app_content_scrollbar.dart';
@@ -425,40 +425,39 @@ class _CategoriesPageState extends State<CategoriesPage> {
           [_audios.length, groups.length, ui(_kind.countLabel)]),
       actions: const [],
       responsiveActions: selector,
-      body: AppContentTransition(
-        identity: _kind,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
-              child: CategoryDisplayControls(
-                  value: _presentation,
-                  onChanged: _setPresentation,
-                  search: TextField(
-                    key: const ValueKey('category-search'),
-                    controller: _search,
-                    onChanged: (value) => setState(() => _query = value),
-                    decoration: InputDecoration(
-                      hintText: _kind == MusicCategoryKind.album
-                          ? ui("搜索专辑或专辑艺术家")
-                          : ui("搜索{0}", [ui(_kind.label)]),
-                      prefixIcon: const Icon(Icons.search),
-                      border: AppShape.inputBorder,
-                      suffixIcon: _query.isEmpty
-                          ? null
-                          : IconButton(
-                              tooltip: ui("清除分类搜索"),
-                              onPressed: () => setState(() {
-                                _query = '';
-                                _search.clear();
-                              }),
-                              icon: const Icon(Icons.close),
-                            ),
-                    ),
-                  )),
-            ),
-            Expanded(
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+            child: CategoryDisplayControls(
+                value: _presentation,
+                onChanged: _setPresentation,
+                search: TextField(
+                  key: const ValueKey('category-search'),
+                  controller: _search,
+                  onChanged: (value) => setState(() => _query = value),
+                  decoration: AppShape.searchDecoration(
+                    context,
+                    hintText: _kind == MusicCategoryKind.album
+                        ? ui("搜索专辑或专辑艺术家")
+                        : ui("搜索{0}", [ui(_kind.label)]),
+                    suffixIcon: _query.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: ui("清除分类搜索"),
+                            onPressed: () => setState(() {
+                              _query = '';
+                              _search.clear();
+                            }),
+                            icon: const Icon(Icons.close_rounded, size: 19),
+                          ),
+                  ),
+                )),
+          ),
+          Expanded(
+            child: AppContentTransition(
+              identity: _kind,
               child: visible.isEmpty
                   ? Center(
                       child: Padding(
@@ -467,7 +466,8 @@ class _CategoriesPageState extends State<CategoriesPage> {
                           groups.isEmpty
                               ? ui("总乐库还没有歌曲。添加本地音乐或将联网歌曲加入总乐库后即可分类浏览。")
                               : ui("未找到匹配的分类"),
-                          textAlign: TextAlign.center),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: scheme.onSurfaceVariant)),
                     ))
                   : AppContentScrollbar(
                       builder: (context, controller) => CoverPointerScope(
@@ -482,13 +482,44 @@ class _CategoriesPageState extends State<CategoriesPage> {
                                     SliverToBoxAdapter(
                                       child: Padding(
                                         padding: const EdgeInsets.fromLTRB(
-                                            12, 0, 12, 8),
-                                        child: Text(note,
-                                            key: const ValueKey(
-                                                'category-explanation'),
-                                            style: TextStyle(
-                                                color:
-                                                    scheme.onSurfaceVariant)),
+                                            8, 0, 8, 10),
+                                        child: DecoratedBox(
+                                          decoration: BoxDecoration(
+                                            color: scheme.surfaceContainerLow,
+                                            borderRadius:
+                                                BorderRadius.circular(14),
+                                            border: Border.all(
+                                              color: scheme.outlineVariant
+                                                  .withValues(alpha: .36),
+                                            ),
+                                          ),
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 14, vertical: 9),
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  Icons.info_outline_rounded,
+                                                  size: 18,
+                                                  color: scheme.primary,
+                                                ),
+                                                const SizedBox(width: 10),
+                                                Expanded(
+                                                  child: Text(
+                                                    note,
+                                                    key: const ValueKey(
+                                                        'category-explanation'),
+                                                    style: TextStyle(
+                                                      fontSize: 13,
+                                                      color: scheme
+                                                          .onSurfaceVariant,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   CategoryTileGrid(
@@ -510,8 +541,8 @@ class _CategoriesPageState extends State<CategoriesPage> {
                               ))),
                     ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -589,61 +620,87 @@ class _CategorySelectorState extends State<_CategorySelector> {
   @override
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
-    return ScrollConfiguration(
-      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-      child: AppHorizontalWheelRegion(
-          controller: _scroll,
-          child: AppScrollbar(
-            controller: _scroll,
-            interactive: true,
-            child: SingleChildScrollView(
-              key: const ValueKey('category-kind-scroll'),
-              controller: _scroll,
-              primary: false,
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (final kind in MusicCategoryKind.browsableValues) ...[
-                    if (kind != MusicCategoryKind.browsableValues.first)
-                      const SizedBox(width: 8),
-                    ConstrainedBox(
-                      key: _chipKeys[kind],
-                      constraints: const BoxConstraints(minHeight: 44),
-                      child: ChoiceChip(
-                        key: ValueKey('category-kind-${kind.name}'),
-                        avatar: Icon(categoryIcon(kind), size: 18),
-                        label: Text(ui(kind.label)),
-                        selected: widget.selected == kind,
-                        showCheckmark: false,
-                        visualDensity: VisualDensity.standard,
-                        materialTapTargetSize: MaterialTapTargetSize.padded,
-                        shape: AppShape.control,
-                        onSelected: (_) => widget.onSelected(kind),
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    final duration = AppMotion.duration(
+      context,
+      MotionKind.feedback,
+      AppMotion.quick,
+    );
+    return Align(
+      alignment: AlignmentDirectional.centerEnd,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerLow,
+          borderRadius: AppShape.pillRadius,
+          border: Border.all(
+            color:
+                scheme.outlineVariant.withValues(alpha: isDark ? .38 : .46),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: ClipRRect(
+            borderRadius: AppShape.pillRadius,
+            child: ScrollConfiguration(
+              behavior:
+                  ScrollConfiguration.of(context).copyWith(scrollbars: false),
+              child: AppHorizontalWheelRegion(
+                controller: _scroll,
+                child: SingleChildScrollView(
+                  key: const ValueKey('category-kind-scroll'),
+                  controller: _scroll,
+                  primary: false,
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final kind
+                          in MusicCategoryKind.browsableValues) ...[
+                        if (kind != MusicCategoryKind.browsableValues.first)
+                          const SizedBox(width: 2),
+                        KeyedSubtree(
+                          key: _chipKeys[kind],
+                          child: _CategoryKindPill(
+                            key: ValueKey('category-kind-${kind.name}'),
+                            icon: categoryIcon(kind),
+                            label: ui(kind.label),
+                            selected: widget.selected == kind,
+                            duration: duration,
+                            onTap: () => widget.onSelected(kind),
+                          ),
+                        ),
+                      ],
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        child: SizedBox(
+                          width: 1,
+                          height: 18,
+                          child: ColoredBox(
+                            color:
+                                scheme.outlineVariant.withValues(alpha: .48),
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
-                  const SizedBox(width: 8),
-                  ConstrainedBox(
-                    key: _personalKey,
-                    constraints: const BoxConstraints(minHeight: 44),
-                    child: ChoiceChip(
-                      key: const ValueKey('category-kind-personal'),
-                      avatar: const Icon(Symbols.bookmarks, size: 18),
-                      label: Text(ui('个人整理')),
-                      selected: widget.selected == null,
-                      showCheckmark: false,
-                      visualDensity: VisualDensity.standard,
-                      materialTapTargetSize: MaterialTapTargetSize.padded,
-                      shape: AppShape.control,
-                      onSelected: (_) => widget.onPersonal(),
-                    ),
+                      KeyedSubtree(
+                        key: _personalKey,
+                        child: _CategoryKindPill(
+                          key: const ValueKey('category-kind-personal'),
+                          icon: Symbols.bookmarks,
+                          label: ui('个人整理'),
+                          selected: widget.selected == null,
+                          duration: duration,
+                          onTap: widget.onPersonal,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
-          )),
+          ),
+        ),
+      ),
     );
   }
 
@@ -651,5 +708,103 @@ class _CategorySelectorState extends State<_CategorySelector> {
   void dispose() {
     _scroll.dispose();
     super.dispose();
+  }
+}
+
+class _CategoryKindPill extends StatefulWidget {
+  const _CategoryKindPill({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.duration,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final Duration duration;
+  final VoidCallback onTap;
+
+  @override
+  State<_CategoryKindPill> createState() => _CategoryKindPillState();
+}
+
+class _CategoryKindPillState extends State<_CategoryKindPill> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    final Color bgColor;
+    final Color fgColor;
+    final Color iconColor;
+    if (widget.selected) {
+      bgColor = scheme.primaryContainer;
+      fgColor = scheme.onPrimaryContainer;
+      iconColor = scheme.onPrimaryContainer;
+    } else if (_hovered) {
+      bgColor =
+          scheme.secondaryContainer.withValues(alpha: isDark ? .40 : .52);
+      fgColor = scheme.onSurface;
+      iconColor = scheme.primary;
+    } else {
+      bgColor = Colors.transparent;
+      fgColor = scheme.onSurfaceVariant;
+      iconColor = scheme.primary;
+    }
+
+    return Semantics(
+      button: true,
+      selected: widget.selected,
+      label: widget.label,
+      child: AnimatedContainer(
+        duration: widget.duration,
+        curve: AppMotion.standardCurve,
+        constraints: const BoxConstraints(minHeight: 36),
+        decoration: ShapeDecoration(
+          color: bgColor,
+          shape: AppShape.pill,
+        ),
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            customBorder: AppShape.pill,
+            onTap: widget.onTap,
+            onHover: (hovering) {
+              if (_hovered != hovering) {
+                setState(() => _hovered = hovering);
+              }
+            },
+            splashColor: scheme.primary.withValues(alpha: .10),
+            highlightColor: scheme.primary.withValues(alpha: .06),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(widget.icon, size: 18, color: iconColor),
+                  const SizedBox(width: 7),
+                  Text(
+                    widget.label,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: (theme.textTheme.labelLarge ?? const TextStyle())
+                        .copyWith(
+                      color: fgColor,
+                      fontWeight:
+                          widget.selected ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

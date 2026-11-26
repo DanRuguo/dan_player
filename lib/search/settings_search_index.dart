@@ -41,11 +41,22 @@ const settingsSearchEntries = <SettingsSearchEntry>[
   SettingsSearchEntry("lyrics", "automatic", "自动联网", ["歌曲评论"]),
   SettingsSearchEntry("lyrics", "source", "首选歌词来源", ["本地", "联网"]),
   SettingsSearchEntry("lyrics", "batch", "批量缓存歌词", ["选择已导入的文件夹", "开始缓存"]),
+  SettingsSearchEntry("lyrics", "annotations", "歌词注音与音标", [
+    "日语假名注音",
+    "英语单词音标",
+    "自动生成日语假名",
+    "自动生成英语音标",
+    "英语音标样式",
+    "纯音标",
+    "斜线 /…/",
+    "方括号 […]",
+    "IPA",
+    "Furigana",
+  ]),
   SettingsSearchEntry("lyrics", "experience", "歌词体验", [
     "歌词弹性滚动",
     "桌面歌词竖排",
     "歌词字间距",
-    "自动生成日语假名",
     "本地歌词多轨顺序",
     "歌词页进度条",
     "波形音柱密度",
@@ -57,6 +68,8 @@ const settingsSearchEntries = <SettingsSearchEntry>[
       "lyrics", "japanese-batch", "批量生成日语假名", ["自动生成日语假名", "开始生成"]),
   SettingsSearchEntry(
       "lyrics", "japanese-online", "联网假名注音", ["Yahoo! JAPAN", "Client ID"]),
+  SettingsSearchEntry("lyrics", "english-batch", "批量生成英语音标",
+      ["自动生成英语音标", "英语音标样式", "开始生成", "IPA"]),
   SettingsSearchEntry(
       "lyrics", "platforms", "平台直连与公开 API", ["QQ音乐", "网易云音乐", "LRCLIB"]),
   SettingsSearchEntry(
@@ -66,8 +79,17 @@ const settingsSearchEntries = <SettingsSearchEntry>[
   SettingsSearchEntry("appearance", "theme", "主题模式", ["修改主题", "专辑封面动态配色"]),
   SettingsSearchEntry("appearance", "font", "字体管理",
       ["自定义字体", "统一字体", "按语言选择", "桌面歌词", "任务栏歌词", "混合文字按语种使用字体"]),
-  SettingsSearchEntry("appearance", "layout", "界面布局",
-      ["音乐列表样式", "紧凑歌单", "开屏底部内容", "加载进度", "经典列表", "资源管理器分栏"]),
+  SettingsSearchEntry("appearance", "layout", "界面布局", [
+    "音乐列表样式",
+    "紧凑歌单",
+    "开屏底部内容",
+    "加载进度",
+    "经典列表",
+    "资源管理器分栏",
+    "触控与点击音效",
+    "点击音效",
+    "Android"
+  ]),
   SettingsSearchEntry("appearance", "sidebar", "侧栏宽度", ["侧边栏"]),
   SettingsSearchEntry("appearance", "simple-playback-bar-playlist", "简易播放条播放列表",
       ["播放列表", "歌曲封面", "文件名", "Dock"]),
@@ -156,7 +178,14 @@ const settingsSearchEntries = <SettingsSearchEntry>[
   SettingsSearchEntry("about", "network-proxy", "网络代理",
       ["系统代理", "直连", "自定义 HTTP 代理", "测试 GitHub 连接"]),
   SettingsSearchEntry("about", "uninstall", "应用管理", ["卸载 Dan Player"]),
-  SettingsSearchEntry("about", "issues", "报告问题", []),
+  SettingsSearchEntry("about", "issues", "报告问题", [
+    "运行日志",
+    "创建问题",
+    "诊断报告",
+    "日志目录",
+    "反馈",
+    "Bug"
+  ]),
   SettingsSearchEntry("about", "about", "关于", ["版本号", "Dan Player"]),
 ];
 

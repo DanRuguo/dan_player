@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 <#
 .SYNOPSIS
 Assembles already-built Windows x64 releases into a new portable ZIP.
@@ -327,9 +327,14 @@ try {
     $un4seenDirectory = Join-Path $licenceDirectory 'UN4SEEN'
     $microsoftDirectory = Join-Path $licenceDirectory 'Microsoft-CRT'
     $bassFxDirectory = Join-Path $licenceDirectory 'BASS_FX'
+    $cmudictDirectory = Join-Path $licenceDirectory 'CMUDICT'
     $null = New-Item -ItemType Directory -Path $licenceDirectory
     $null = New-Item -ItemType Directory -Path $microsoftDirectory
     $null = New-Item -ItemType Directory -Path $bassFxDirectory
+    $null = New-Item -ItemType Directory -Path $cmudictDirectory
+    foreach ($cmudictFile in @('LICENSE', 'PROVENANCE.md')) {
+        Copy-FileUnchanged (Join-Path $repositoryRoot ("licenses\CMUDICT\$cmudictFile")) (Join-Path $cmudictDirectory $cmudictFile)
+    }
     foreach ($notice in @($bundledFontNotices) + @($bundledReadingNotices)) {
         $fontNoticeTarget = Join-Path $payloadDirectory $notice.RelativePath
         $fontNoticeParent = Split-Path -Parent $fontNoticeTarget

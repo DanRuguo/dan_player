@@ -156,10 +156,17 @@ bool IsOptionalComponent(const fs::path& relative) {
     const std::wstring root(prefix);
     if (path.rfind(root, 0) != 0) continue;
     const auto file = path.substr(root.size());
-    return file == L"ipadic-reading.bin.gz" || file == L"module.json" ||
+    return file == L"ipadic-reading.bin.gz" ||
+           file == L"supplemental-reading-v2.bin.gz" ||
+           file == L"supplemental-reading-v1.json.gz" ||
+           file == L"kanji-reading-v1.json.gz" ||
+           file == L"module.json" ||
            file == L"readme.txt" || file == L"licenses/lindera/license" ||
            file == L"licenses/ipadic/notice.txt" ||
-           file == L"licenses/ipadic/provenance.md";
+           file == L"licenses/ipadic/provenance.md" ||
+           file == L"licenses/edrdg/licence.html" ||
+           file == L"licenses/edrdg/cc-by-sa-4.0.txt" ||
+           file == L"licenses/edrdg/provenance.md";
   }
   return false;
 }

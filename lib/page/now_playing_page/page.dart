@@ -385,6 +385,12 @@ class _DesktopLyricSwitch extends StatelessWidget {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
+    final feedbackDuration = AppMotion.duration(
+      context,
+      MotionKind.feedback,
+      AppMotion.quick,
+    );
+    final reducedMotion = feedbackDuration == Duration.zero;
     return ListenableBuilder(
       listenable: PlayService.instance.desktopLyricService,
       builder: (context, _) {
@@ -407,24 +413,43 @@ class _DesktopLyricSwitch extends StatelessWidget {
           DesktopLyricState.failed =>
             desktopLyricService.startDesktopLyric,
         };
+        final stateKey = (
+          desktopLyricService.state,
+          desktopLyricService.isLocked,
+          desktopLyricService.isStarting,
+          reducedMotion,
+        );
 
         return IconButton(
           tooltip: tooltip,
           onPressed: onPressed,
-          icon: desktopLyricService.isStarting
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2.2),
-                )
-              : Icon(
-                  desktopLyricService.state == DesktopLyricState.failed
-                      ? Symbols.error
-                      : desktopLyricService.isLocked
-                          ? Symbols.lock
-                          : Symbols.toast,
-                  fill: desktopLyricService.isRunning ? 1 : 0,
-                ),
+          icon: AnimatedSwitcher(
+            duration: feedbackDuration,
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            child: desktopLyricService.isStarting
+                ? (reducedMotion
+                    ? Icon(
+                        Symbols.hourglass_top,
+                        key: ValueKey(stateKey),
+                        size: 20,
+                      )
+                    : SizedBox(
+                        key: ValueKey(stateKey),
+                        width: 20,
+                        height: 20,
+                        child: const CircularProgressIndicator(strokeWidth: 2.2),
+                      ))
+                : Icon(
+                    key: ValueKey(stateKey),
+                    desktopLyricService.state == DesktopLyricState.failed
+                        ? Symbols.error
+                        : desktopLyricService.isLocked
+                            ? Symbols.lock
+                            : Symbols.toast,
+                    fill: desktopLyricService.isRunning ? 1 : 0,
+                  ),
+          ),
           color: scheme.primary,
         );
       },

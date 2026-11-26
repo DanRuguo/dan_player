@@ -12,6 +12,7 @@ export 'package:dan_player/lyric/local_lyric_origin.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_edit_codec.dart';
 import 'package:dan_player/lyric/lyric_text_codec.dart';
+import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/src/rust/api/tag_reader.dart';
 import 'package:dan_player/utils.dart';
 import 'package:path/path.dart' as path;
@@ -88,6 +89,7 @@ Future<String?> _sourceFingerprint(
 Future<Lyric?> readLocalLyric(Audio audio,
     {LocalLyricLineOrder? lineOrder,
     LocalLyricVariant? variant,
+    bool allowEmbeddedPlain = true,
     bool Function()? stillCurrent,
     Future<String?> Function(String)? readEmbedded,
     void Function(String)? onWarning}) async {
@@ -127,6 +129,7 @@ Future<Lyric?> readLocalLyric(Audio audio,
       _memory.remove(key);
       _memory[key] = cached;
       final copy = cached.snapshot.toLyric();
+      if (!allowEmbeddedPlain && copy is PlainLyric) return null;
       markDiscoveredLocalLyric(copy, cached.origin);
       return active() ? copy : null;
     }
@@ -200,7 +203,8 @@ Future<Lyric?> readLocalLyric(Audio audio,
     final text = await (readEmbedded ??
         (audioPath) => getLyricFromPath(path: audioPath))(audio.localFilePath);
     if (!active() || text == null) return null;
-    final lyric = parseLocalLyricText(text, lineOrder: order);
+    final lyric = parseLocalLyricText(text, lineOrder: order) ??
+        (allowEmbeddedPlain ? parseEmbeddedPlainLyricText(text) : null);
     return lyric == null
         ? null
         : await complete(lyric, 'embedded:${audio.localFilePath}');

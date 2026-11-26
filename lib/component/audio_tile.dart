@@ -33,7 +33,6 @@ import 'package:dan_player/app_paths.dart' as app_paths;
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/play_service/playback_service.dart';
 import 'package:flutter/material.dart';
-import 'package:dan_player/component/app_shape.dart';
 import 'package:flutter/services.dart';
 import 'package:filepicker_windows/filepicker_windows.dart';
 import 'package:go_router/go_router.dart';
@@ -126,7 +125,7 @@ class _AudioTileState extends State<AudioTile> {
         builder: (context) {
           _artworkContext = context;
           return ClipRRect(
-            borderRadius: AppShape.smallRadius,
+            borderRadius: BorderRadius.circular(10),
             child: _wrapArtwork(AudioArtwork(
               audio: audio,
               size: 48,
@@ -437,10 +436,16 @@ class _AudioTileState extends State<AudioTile> {
           final outlineColor = selected || widget.focus
               ? scheme.primary.withValues(alpha: selected ? 0.22 : 0.18)
               : Colors.transparent;
-          final placeholder = Icon(
-            Symbols.broken_image,
-            size: 48.0,
-            color: scheme.onSurfaceVariant,
+          final placeholder = ColoredBox(
+            color: scheme.surfaceContainerHighest,
+            child: SizedBox.square(
+              dimension: 48.0,
+              child: Icon(
+                Symbols.music_note,
+                size: 22.0,
+                color: scheme.primary,
+              ),
+            ),
           );
           final durationText =
               Duration(seconds: audio.duration).toStringHMMSS();
@@ -455,7 +460,9 @@ class _AudioTileState extends State<AudioTile> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: scheme.primary,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: widget.focus ? scheme.primary : scheme.onSurfaceVariant,
               fontFeatures: tabularFiguresFeatures,
             ),
           );
@@ -535,6 +542,7 @@ class _AudioTileState extends State<AudioTile> {
                     defaultListAction('audio-menu-${audio.path}'));
           }
 
+          const rowRadius = BorderRadius.all(Radius.circular(14));
           return TweenAnimationBuilder<Color?>(
             tween: ColorTween(begin: Colors.transparent, end: tileColor),
             duration: AppMotion.duration(
@@ -545,7 +553,7 @@ class _AudioTileState extends State<AudioTile> {
               child: Ink(
                 decoration: BoxDecoration(
                   color: color,
-                  borderRadius: AppShape.controlRadius,
+                  borderRadius: rowRadius,
                   border: Border.all(color: outlineColor),
                 ),
                 child: child,
@@ -553,7 +561,7 @@ class _AudioTileState extends State<AudioTile> {
             ),
             child: AppItemInkWell(
                 focusColor: Colors.transparent,
-                borderRadius: AppShape.controlRadius,
+                borderRadius: rowRadius,
                 overlayColor: WidgetStateProperty.resolveWith((states) {
                   if (states.contains(WidgetState.pressed)) {
                     return scheme.primary.withValues(alpha: 0.12);
@@ -726,13 +734,17 @@ class _AudioTileState extends State<AudioTile> {
                                                 AppFontText(
                                                   audio.displayTitle,
                                                   style: TextStyle(
-                                                      color: textColor,
-                                                      fontSize: 16),
+                                                    color: textColor,
+                                                    fontSize: 15.5,
+                                                    fontWeight: widget.focus
+                                                        ? FontWeight.w700
+                                                        : FontWeight.w600,
+                                                  ),
                                                   maxLines: 1,
                                                   overflow:
                                                       TextOverflow.ellipsis,
                                                 ),
-                                                const SizedBox(width: 4.0),
+                                                const SizedBox(height: 2.0),
                                                 AppFontText(
                                                   widget.showSourceLabel &&
                                                           sourceLabel != null
@@ -741,7 +753,9 @@ class _AudioTileState extends State<AudioTile> {
                                                             ])} · ${audio.artist} - ${audio.album}'
                                                       : "${audio.artist} - ${audio.album}",
                                                   style: TextStyle(
-                                                      color: metadataColor),
+                                                    fontSize: 13.5,
+                                                    color: metadataColor,
+                                                  ),
                                                   maxLines: 1,
                                                   overflow:
                                                       TextOverflow.ellipsis,

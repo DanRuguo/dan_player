@@ -118,6 +118,8 @@ class DesktopLyricText extends StatefulWidget {
       this.maxHorizontalWidth,
       this.rubySpans = const [],
       this.rubyVisibility = 1,
+      this.japaneseRubyVisibility,
+      this.phoneticRubyVisibility,
       this.reducedMotion = false});
 
   final String text;
@@ -129,6 +131,8 @@ class DesktopLyricText extends StatefulWidget {
   final List<DesktopLyricWord> words;
   final List<LyricRubySpan> rubySpans;
   final double rubyVisibility;
+  final double? japaneseRubyVisibility;
+  final double? phoneticRubyVisibility;
   final bool vertical;
 
   /// Additional gap between complete upright display units. Horizontal words
@@ -373,6 +377,8 @@ class _DesktopLyricTextState extends State<DesktopLyricText>
                 layout: _layout!,
                 clock: widget.clock,
                 rubyVisibility: widget.rubyVisibility,
+                japaneseRubyVisibility: widget.japaneseRubyVisibility,
+                phoneticRubyVisibility: widget.phoneticRubyVisibility,
                 reducedMotion: reducedMotion),
             isComplex: true,
             willChange: widget.words.isNotEmpty && !reducedMotion,
@@ -832,6 +838,8 @@ class DesktopLyricTextPainter extends CustomPainter {
   DesktopLyricTextPainter._(
       {required _DesktopLyricTextLayout layout,
       this.rubyVisibility = 1,
+      this.japaneseRubyVisibility,
+      this.phoneticRubyVisibility,
       required this.clock,
       required this.reducedMotion})
       : _layout = layout,
@@ -839,6 +847,8 @@ class DesktopLyricTextPainter extends CustomPainter {
 
   final _DesktopLyricTextLayout _layout;
   final double rubyVisibility;
+  final double? japaneseRubyVisibility;
+  final double? phoneticRubyVisibility;
   // Spacing animates the outer group; this painter retains one target layout.
   @visibleForTesting
   double get layoutProgress => 1;
@@ -926,7 +936,15 @@ class DesktopLyricTextPainter extends CustomPainter {
       ruby.paintPrimary(canvas, () => _paintPrimaryLayout(canvas),
           visibility: rubyVisibility);
     }
-    ruby.paint(canvas, visibility: rubyVisibility);
+    final perSpan = (japaneseRubyVisibility != null &&
+                japaneseRubyVisibility != rubyVisibility) ||
+            (phoneticRubyVisibility != null &&
+                phoneticRubyVisibility != rubyVisibility)
+        ? (LyricRubySpan span) => isLyricPhoneticSpan(span)
+            ? (phoneticRubyVisibility ?? rubyVisibility)
+            : (japaneseRubyVisibility ?? rubyVisibility)
+        : null;
+    ruby.paint(canvas, visibility: rubyVisibility, spanVisibility: perSpan);
     canvas.restore();
   }
 
@@ -1026,5 +1044,7 @@ class DesktopLyricTextPainter extends CustomPainter {
       !identical(_layout, oldDelegate._layout) ||
       !identical(clock, oldDelegate.clock) ||
       reducedMotion != oldDelegate.reducedMotion ||
-      rubyVisibility != oldDelegate.rubyVisibility;
+      rubyVisibility != oldDelegate.rubyVisibility ||
+      japaneseRubyVisibility != oldDelegate.japaneseRubyVisibility ||
+      phoneticRubyVisibility != oldDelegate.phoneticRubyVisibility;
 }

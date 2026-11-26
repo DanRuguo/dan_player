@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
+import 'package:dan_player/app_settings.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -35,10 +37,56 @@ Future<String> probeFfmpeg(String executable, List<String> args) async {
   }
 }
 
+Future<bool> isFfmpegDirectoryPathSafe(String directory,
+    {bool allowMissing = false}) async {
+  try {
+    var current = p.normalize(p.absolute(directory));
+    while (true) {
+      final type = await FileSystemEntity.type(current, followLinks: false);
+      if (type != FileSystemEntityType.directory &&
+          !(allowMissing && type == FileSystemEntityType.notFound)) {
+        return false;
+      }
+      final parent = p.dirname(current);
+      if (p.equals(parent, current)) return true;
+      current = parent;
+    }
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<bool> _canWriteToolSubdirectory(String appDir) async {
+  if (!await isFfmpegDirectoryPathSafe(appDir)) return false;
+  final toolRoot = Directory(p.join(appDir, 'tool'));
+  if (!await isFfmpegDirectoryPathSafe(toolRoot.path, allowMissing: true)) {
+    return false;
+  }
+  Directory? probe;
+  try {
+    await toolRoot.create(recursive: true);
+    probe = await toolRoot.createTemp('.danplayer-tool-probe-');
+    return true;
+  } catch (_) {
+    return false;
+  } finally {
+    if (probe != null) {
+      try {
+        if (await probe.exists()) await probe.delete(recursive: true);
+      } catch (_) {}
+    }
+  }
+}
+
 class FfmpegRuntime {
-  FfmpegRuntime({FfmpegProbe? probe, this.installRoot})
-      : _probe = probe ?? probeFfmpeg;
+  FfmpegRuntime({
+    FfmpegProbe? probe,
+    this.installRoot,
+    this.applicationDirectory,
+  }) : _probe = probe ?? probeFfmpeg;
+
   final Directory? installRoot;
+  final Directory? applicationDirectory;
   static final shared = FfmpegRuntime();
   final FfmpegProbe _probe;
   Map<String, String>? _ready;
@@ -55,10 +103,22 @@ class FfmpegRuntime {
     return value;
   }
 
-  Future<Directory> get installDirectory async =>
-      installRoot ??
-      Directory(p.join((await getApplicationSupportDirectory()).path, 'tools',
-          'ffmpeg-7.1.1'));
+  /// Installs into `<appDir>/tool/ffmpeg` beside the player executable when
+  /// writable, falling back to `<AppDataDir>/tool/ffmpeg` only if read-only.
+  Future<Directory> get installDirectory async {
+    if (installRoot != null) return installRoot!;
+    if (applicationDirectory != null) {
+      if (await _canWriteToolSubdirectory(applicationDirectory!.path)) {
+        return Directory(p.join(applicationDirectory!.path, 'tool', 'ffmpeg'));
+      }
+    } else if (Platform.environment['FLUTTER_TEST'] != 'true') {
+      final appDir = p.dirname(Platform.resolvedExecutable);
+      if (await _canWriteToolSubdirectory(appDir)) {
+        return Directory(p.join(appDir, 'tool', 'ffmpeg'));
+      }
+    }
+    return Directory(p.join((await getAppDataDir()).path, 'tool', 'ffmpeg'));
+  }
 
   Future<List<String>> candidates() async {
     final env = Platform.environment;
@@ -72,9 +132,28 @@ class FfmpegRuntime {
       }
     }
 
+    final app =
+        applicationDirectory?.path ?? p.dirname(Platform.resolvedExecutable);
+    result.addAll([
+      p.join(app, 'tool', 'ffmpeg'),
+      p.join(app, 'tool', 'ffmpeg', 'bin'),
+      p.join(app, 'tool'),
+      p.join(app, 'tools', 'ffmpeg'),
+      (await installDirectory).path,
+    ]);
+    try {
+      final dataDir = (await getAppDataDir()).path;
+      result.add(p.join(dataDir, 'tool', 'ffmpeg'));
+      result.add(p.join(dataDir, 'tools', 'ffmpeg'));
+    } catch (_) {}
+    try {
+      final supportDir = (await getApplicationSupportDirectory()).path;
+      result.add(p.join(supportDir, 'tools', 'ffmpeg-7.1.1'));
+    } catch (_) {}
+
     addPath(env['PATH'] ?? env['Path']);
     // Re-read persistent PATH so "I have installed it" works without restarting.
-    if (Platform.isWindows) {
+    if (Platform.isWindows && env['FLUTTER_TEST'] != 'true') {
       try {
         final shell = p.join(env['SystemRoot'] ?? r'C:\Windows', 'System32',
             'WindowsPowerShell', 'v1.0', 'powershell.exe');
@@ -91,32 +170,37 @@ class FfmpegRuntime {
         }
       } catch (_) {/* The inherited PATH and local module remain available. */}
     }
-    final app = p.dirname(Platform.resolvedExecutable);
-    result.addAll([
-      p.join(app, 'tool', 'ffmpeg'),
-      p.join(app, 'tool', 'ffmpeg', 'bin'),
-      p.join(app, 'tool'),
-      p.join(app, 'tools', 'ffmpeg'),
-      (await installDirectory).path,
-    ]);
     return result.toSet().toList();
   }
 
-  Future<bool> ensure({bool force = false, List<String>? directories}) {
-    if (force) invalidate();
-    if (ready) return Future.value(true);
-    return _pending ??=
-        _discover(directories).whenComplete(() => _pending = null);
+  Future<bool> ensure({bool force = false, List<String>? directories}) async {
+    if (force) {
+      final inflight = _pending;
+      if (inflight != null) {
+        try {
+          await inflight;
+        } catch (_) {}
+      }
+      invalidate();
+    }
+    if (ready && directories == null) return true;
+    return await (_pending ??=
+        _discover(directories).whenComplete(() => _pending = null));
   }
 
   Future<bool> validateDirectory(String directory) async {
     try {
+      if (!await isFfmpegDirectoryPathSafe(directory)) return false;
       final paths = {
         for (final name in ffmpegToolNames)
           name: p.join(directory, '$name${Platform.isWindows ? '.exe' : ''}')
       };
       for (final name in ffmpegToolNames) {
-        if (!await File(paths[name]!).exists()) return false;
+        final f = File(paths[name]!);
+        if (await FileSystemEntity.type(f.path, followLinks: false) !=
+            FileSystemEntityType.file) {
+          return false;
+        }
         final version = await _probe(paths[name]!, ['-version']);
         if (!version.startsWith('$name version ')) return false;
       }

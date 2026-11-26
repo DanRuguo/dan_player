@@ -4,9 +4,58 @@ import 'package:dan_player/lyric/lrc.dart';
 import 'package:dan_player/lyric/lyric.dart';
 import 'package:dan_player/lyric/lyric_edit_codec.dart';
 import 'package:dan_player/lyric/local_lyric_preferences.dart';
+import 'package:dan_player/lyric/plain_lyric.dart';
 import 'package:dan_player/lyric/qrc.dart';
 import 'package:dan_player/lyric/ttml.dart';
 export 'package:dan_player/lyric/local_lyric_preferences.dart';
+
+final _qrcXmlContentPattern = RegExp(
+  r'''LyricContent\s*=\s*(["'])(.*?)\1''',
+  dotAll: true,
+  caseSensitive: false,
+);
+final _xmlEntityPattern = RegExp(
+  r'&#(x[0-9a-f]+|\d+);',
+  caseSensitive: false,
+);
+final _hexPrefixPattern = RegExp('[xX]');
+final _descriptiveTagLinePattern = RegExp(
+  r'^\s*\[[a-z_]+:[^\r\n]*\]\s*$',
+  caseSensitive: false,
+);
+final _offsetTagPattern = RegExp(
+  r'\[\s*offset\s*:\s*([+-]?\d+)\s*\]',
+  caseSensitive: false,
+);
+final _leadingSquareStampsPattern = RegExp(
+  r'^(?:\s*\[\d+:\d+(?:[.:]\d+)?\])+',
+);
+final _binaryControlCharPattern = RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F]');
+
+/// Parses embedded unsynced tag text (`USLT`, `UNSYNCEDLYRICS`, plain `LYRICS`)
+/// into a [PlainLyric] when it contains readable lines without timestamps.
+PlainLyric? parseEmbeddedPlainLyricText(String text) {
+  if (utf8.encode(text).length > LyricEditDraft.maxBytes) return null;
+  if (_binaryControlCharPattern.hasMatch(text)) return null;
+  final trimmed = text.trim();
+  if (trimmed.isEmpty || trimmed.startsWith('<')) return null;
+  final lines = const LineSplitter()
+      .convert(text)
+      .where((row) => !_descriptiveTagLinePattern.hasMatch(row))
+      .map((row) => row.trimRight())
+      .toList();
+  while (lines.isNotEmpty && lines.first.trim().isEmpty) {
+    lines.removeAt(0);
+  }
+  while (lines.isNotEmpty && lines.last.trim().isEmpty) {
+    lines.removeLast();
+  }
+  if (lines.isEmpty) return null;
+  final cleaned = lines.join('\n');
+  if (cleaned.trim().isEmpty) return null;
+  final lyric = PlainLyric(cleaned);
+  return hasLyricContent(lyric) ? lyric : null;
+}
 
 Lyric? parseLocalLyricText(String text,
     {String extension = '.lrc',
@@ -21,17 +70,15 @@ Lyric? parseLocalLyricText(String text,
     return lyric;
   }
   if (extension == '.qrc' && text.trimLeft().startsWith('<')) {
-    final content = RegExp(r'''LyricContent\s*=\s*(["'])(.*?)\1''',
-            dotAll: true, caseSensitive: false)
-        .firstMatch(text)?[2];
+    final content = _qrcXmlContentPattern.firstMatch(text)?[2];
     if (content == null) throw const FormatException('无法识别文本 QRC');
     text = content
-        .replaceAllMapped(RegExp(r'&#(x[0-9a-f]+|\d+);', caseSensitive: false),
-            (match) {
+        .replaceAllMapped(_xmlEntityPattern, (match) {
           final number = match[1]!;
+          final isHex = number.startsWith(_hexPrefixPattern);
           final code = int.parse(
-              number.startsWith(RegExp('[xX]')) ? number.substring(1) : number,
-              radix: number.startsWith(RegExp('[xX]')) ? 16 : 10);
+              isHex ? number.substring(1) : number,
+              radix: isHex ? 16 : 10);
           return String.fromCharCode(code);
         })
         .replaceAll('&quot;', '"')
@@ -43,9 +90,7 @@ Lyric? parseLocalLyricText(String text,
   // Exporters add descriptive tags which must never appear as lyric content.
   final rows = const LineSplitter()
       .convert(text)
-      .where((row) =>
-          !RegExp(r'^\s*\[[a-z_]+:[^\r\n]*\]\s*$', caseSensitive: false)
-              .hasMatch(row))
+      .where((row) => !_descriptiveTagLinePattern.hasMatch(row))
       .join('\n');
   if (const ['.qrc', '.krc', '.yrc'].contains(extension)) {
     final format = switch (extension) {
@@ -60,28 +105,25 @@ Lyric? parseLocalLyricText(String text,
             .convert(text)
             .where((row) =>
                 row.trimLeft().startsWith('[language:') ||
-                !RegExp(r'^\s*\[[a-z_]+:[^\r\n]*\]\s*$', caseSensitive: false)
-                    .hasMatch(row))
+                !_descriptiveTagLinePattern.hasMatch(row))
             .join('\n')
         : rows;
     return LyricEditDraft(format, body).parse();
   }
-  final offset = int.tryParse(
-          RegExp(r'\[\s*offset\s*:\s*([+-]?\d+)\s*\]', caseSensitive: false)
-                  .firstMatch(text)?[1] ??
-              '') ??
-      0;
+  final offset = int.tryParse(_offsetTagPattern.firstMatch(text)?[1] ?? '') ?? 0;
   final parsed = <LyricLine>[];
   for (final raw in const LineSplitter().convert(rows)) {
     final line = raw.trim();
     final leading = _squareStamp.matchAsPrefix(line);
     if (leading == null) continue;
     final remainder = line.substring(leading.end);
-    // Several adjacent leading tags with text afterwards are chorus repeats.
+    final allLeading = _leadingSquareStampsPattern.firstMatch(line);
+    final afterLeading =
+        allLeading == null ? remainder : line.substring(allLeading.end);
+    // Several leading tags (even separated by spaces) with text afterwards are
+    // chorus repeats; only inline timestamps after body text are word-timed.
     final wordTiming = _angleStamp.hasMatch(remainder) ||
-        (remainder.isNotEmpty &&
-            !remainder.startsWith('[') &&
-            _squareStamp.hasMatch(remainder));
+        (afterLeading.isNotEmpty && _squareStamp.hasMatch(afterLeading));
     if (!wordTiming) {
       parsed.addAll(LrcLine.fromLineAll(line, offset));
       continue;
@@ -175,8 +217,8 @@ Lyric? parseLocalLyricText(String text,
   return lyric;
 }
 
-final _squareStamp = RegExp(r'\[(\d+):(\d+)(?:\.(\d+))?\]');
-final _angleStamp = RegExp(r'<(\d+):(\d+)(?:\.(\d+))?>');
+final _squareStamp = RegExp(r'\[(\d+):(\d+)(?:[.:](\d+))?\]');
+final _angleStamp = RegExp(r'<(\d+):(\d+)(?:[.:](\d+))?>');
 Duration _time(Match match, int offset) {
   final minutes = int.parse(match[1]!);
   final seconds = int.parse(match[2]!);

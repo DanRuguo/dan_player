@@ -98,7 +98,8 @@ class ReplayGainSettingsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     return SettingsSurface(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       SettingsHeader(
           title: ui('ReplayGain 音量均衡'),
           icon: Icons.graphic_eq,
@@ -219,7 +220,7 @@ class _ReplayGainChoiceState extends State<_ReplayGainChoice> {
           const SizedBox(height: 6),
           AppMenuAnchor(
               style: const MenuStyle(
-                  shape: WidgetStatePropertyAll(AppShape.control)),
+                  shape: WidgetStatePropertyAll(AppShape.surface)),
               menuChildren: [
                 for (final gain
                     in {...ReplayGainPreferences.gainPresets, value}.toList()

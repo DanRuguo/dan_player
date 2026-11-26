@@ -46,11 +46,7 @@
 </div>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/library-dark-wide.png">
-    <source media="(prefers-color-scheme: light)" srcset="docs/images/library-light-wide.png">
-    <img src="docs/images/library-light-wide.png" alt="중국어 인터페이스와 가상 데이터를 사용한 Dan Player 라이브러리 및 재생 컨트롤" width="1200">
-  </picture>
+  <img src="docs/images/snapshot8-categories-ko.png" alt="사용자 지정 표지와 다양한 타일 크기로 표시한 앨범 분류" width="910">
 </p>
 
 <p align="center">
@@ -71,7 +67,7 @@
 
 **설치 버전**은 설치 프로그램을 실행하면 되며, 기존 설치를 업데이트할 수 있습니다. **포터블 버전**은 ZIP 전체를 압축 해제한 뒤 `Dan Player.exe`를 실행하세요. EXE 파일만 따로 복사하지 마세요. 바탕 화면 가사는 동일한 실행 파일에서 별도 프로세스로 실행됩니다.
 
-현재 포터블 ZIP에는 FFmpeg, 세 가지 오프라인 일본어 읽기 데이터(기본 사전·어휘 보충·한자 읽기 보충)와 라이선스가 포함되어 미리 듣기, 자르기와 오프라인 읽기 생성에 사용할 수 있습니다. 경량 설치 프로그램은 이 두 종류의 구성 요소를 제외하고 이미 설치한 것은 유지합니다. 플레이어에서 직접 받을 때도 고정 크기와 SHA-256을 검증합니다. FFmpeg는 [26.0.5의 별도 패키지](https://github.com/DanRuguo/dan_player/releases/tag/v26.0.5), 읽기 데이터는 [26.1.1 릴리스 페이지](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.1)에서 각각 받을 수 있습니다.
+스냅샷 8 포터블 ZIP에는 오디오용 FFmpeg 7.1.1과 오프라인 일본어 읽기 데이터 세 종류가 들어 있습니다. 경량 설치 프로그램을 사용한다면 설정에서 필요한 구성 요소를 추가할 수 있습니다. 플레이어가 이번 릴리스에서 파일을 내려받아 크기와 SHA-256을 확인하고 `tool`에 설치한 뒤 다시 검사합니다. 두 버전 모두 1 MB 미만의 영어 IPA 사전을 내장합니다. [스냅샷 8 릴리스 및 구성 요소](https://github.com/DanRuguo/dan_player/releases/tag/v26.1.2-snapshot.8)
 
 > **다운로드 및 서명 안내:** 프로젝트에서 빌드한 실행 파일은 RCEIT.Inc 자체 서명 인증서를 사용하므로 Windows에 신뢰 관련 경고가 나타날 수 있습니다. 설치 프로그램은 신뢰할 수 있는 인증서를 자동으로 설치하지 않습니다. 이전 서명을 사용하는 버전에서 업데이트할 때는 새 설치 프로그램을 직접 다운로드하세요. 미리 보기 버전은 Latest로 표시된 안정 버전을 대체하지 않습니다. 업데이트 전에 앱의 백업 및 복원 설정에서 개인 데이터를 백업하는 것이 좋습니다.
 
@@ -116,61 +112,13 @@ Get-FileHash -LiteralPath '.\DanPlayer-VERSION-Setup-x64.exe' -Algorithm SHA256
 
 ## 화면 미리 보기
 
-### 다음 곡과 스펙트럼 가이드
+검색 필터를 쓰거나 기록에서 검색어를 다시 선택할 수 있습니다. 설정의 업데이트 및 정보에서 문제 보고를 열면 최근 15일간의 로그를 세션 또는 심각도별로 볼 수 있습니다. 내용을 편집한 뒤 GitHub 초안을 여세요.
 
-실제 구성 요소를 한국어 UI와 가상 데이터로 렌더링했습니다. 스펙트럼은 가이드 시연이며 실시간 오디오 측정 결과가 아닙니다.
-
-| 다음 네 곡의 반투명 카드 | 둥근 막대와 픽셀 스펙트럼 가이드 |
+| 검색과 최근 검색어 | 문제 보고 |
 | --- | --- |
-| ![한국어 다음 곡 미리 보기: 네 개의 반투명 카드를 두 열로 표시](docs/images/feature-upcoming-ko.png) | ![한국어 사용 가이드의 둥근 막대와 픽셀 스펙트럼 시연](docs/images/feature-spectrum-guide-ko.png) |
+| ![검색과 최근 검색어](docs/images/snapshot8-search-ko.png) | ![문제 보고](docs/images/snapshot8-report-ko.png) |
 
-### 설명서와 필요할 때만 작동하는 모니터링
-
-실제 구성 요소를 중국어 인터페이스로 렌더링한 예시입니다. 사용량과 경로는 가상 데이터입니다.
-
-| 자주 쓰는 기능 안내 | 재생 대기열과 직접 조작하는 예시 |
-| --- | --- |
-| ![음악, 분류, 재생목록 조작 안내](docs/images/manual-common-library.png) | ![재생 위치 예시와 대기열 조작 안내](docs/images/manual-playback-demo.png) |
-
-| 여러 위치에서 리소스 모니터링 | 캐시 용량 분류 |
-| --- | --- |
-| ![사이드바와 백업 설정이 공유하는 리소스 모니터링](docs/images/process-resource-locations.png) | ![통계 화면의 캐시 및 플레이어 데이터 용량 분류](docs/images/cache-storage-statistics.png) |
-
-### 두 가지 가사 편집 방식
-
-| 눌러서 타이밍 지정: 텍스트 준비 | 눌러서 타이밍 지정: 좁은 창에서 단어 기록 |
-| --- | --- |
-| ![중국어 인터페이스의 가사 본문, 번역, 발음 입력](docs/images/lyric-tap-text-zh.png) | ![중국어 인터페이스의 좁은 창에서 단어 타이밍 지정](docs/images/lyric-tap-words-narrow-zh.png) |
-
-| 텍스트 편집: 가사 코드 | 텍스트 편집: 단어 미리 보기 |
-| --- | --- |
-| ![중국어 인터페이스의 QRC 가사 코드 편집](docs/images/lyric-code-editor-zh.png) | ![중국어 인터페이스의 단어별 가사 미리 보기](docs/images/lyric-editor-preview-zh.png) |
-
-### 나만의 방식으로 컬렉션 정리
-
-| 재생목록 및 컬렉션 | 외관 및 설정 |
-| --- | --- |
-| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/playlists-dark-wide.png"><img src="docs/images/playlists-light-wide.png" alt="중국어 인터페이스의 재생목록 관리 화면" width="600"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/settings-dark-wide.png"><img src="docs/images/settings-light-wide.png" alt="중국어 인터페이스의 테마 및 그룹별 설정" width="600"></picture> |
-
-### 듣고 싶은 곡을 찾고 가사에 집중
-
-| 검색 및 기록 | 미니 플레이어 및 가사 |
-| --- | --- |
-| ![실제 Flutter 위젯으로 렌더링한 한국어 검색 페이지 콘텐츠 영역과 가운데 정렬된 기록 칩](docs/images/search-history-ko.png) | ![가상 데이터를 사용한 미니 플레이어와 가사 화면](docs/images/feature-mini-lyrics-dark.png) |
-
-### 청취 기록으로 라이브러리 다시 발견하기
-
-![가상 데이터를 사용한 중국어 인터페이스의 음악 통계 및 순위](docs/images/statistics-rankings-light.png)
-
-<sub>실제 Flutter 위젯을 격리된 데모 데이터로 렌더링했습니다. 검색 이미지는 한국어 페이지의 콘텐츠 영역과 예시 기록이며, 네이티브 창 전체를 캡처한 화면이 아닙니다. 다른 예시는 주로 중국어 인터페이스를 사용합니다. 배치와 기능을 소개하는 이미지로, 실시간 오디오나 Windows 네이티브 효과의 검증 결과는 아닙니다. 테마, 창 너비, 4개 언어 예시는 <a href="docs/images/README.md">화면 갤러리</a>에서 확인하세요.</sub>
-
-### 분류 타일과 시작 안내
-
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/feature-category-tiles-dark.png"><img src="docs/images/feature-category-tiles-light.png" alt="분류별 보기 설정과 다양한 표지 크기. 가상 데모 데이터 사용" width="1200"></picture>
-
-| 첫 실행 안내: 언어 선택과 재생 조작 체험 | 플레이어 데이터와 로컬 음악 선택 복원 |
-| --- | --- |
-| ![첫 실행 안내: 언어 선택과 재생 조작 체험](docs/images/feature-onboarding-ko.png) | ![플레이어 데이터와 로컬 음악 선택 복원](docs/images/feature-restore-ko.png) |
+[다른 화면과 기능 예시](docs/images/README.md)
 
 <a id="quick-start"></a>
 

@@ -21,21 +21,24 @@ class AppShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AutomaticUpdateCheck(
-      child: ValueListenableBuilder<WindowBackdropStatus>(
-        valueListenable: WindowBackdropService.instance,
-        builder: (_, status, child) =>
-            AppWindowSurface(status: status, child: child!),
-        child: ResponsiveBuilder(
-          builder: (context, screenType) {
-            switch (screenType) {
-              case ScreenType.small:
-                return _AppShell_Small(page: page);
-              case ScreenType.medium:
-              case ScreenType.large:
-                return _AppShell_Large(page: page);
-            }
-          },
+    return Listener(
+      behavior: HitTestBehavior.opaque,
+      child: AutomaticUpdateCheck(
+        child: ValueListenableBuilder<WindowBackdropStatus>(
+          valueListenable: WindowBackdropService.instance,
+          builder: (_, status, child) =>
+              AppWindowSurface(status: status, child: child!),
+          child: ResponsiveBuilder(
+            builder: (context, screenType) {
+              switch (screenType) {
+                case ScreenType.small:
+                  return _AppShell_Small(page: page);
+                case ScreenType.medium:
+                case ScreenType.large:
+                  return _AppShell_Large(page: page);
+              }
+            },
+          ),
         ),
       ),
     );

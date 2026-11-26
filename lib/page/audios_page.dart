@@ -6,6 +6,7 @@ import 'package:dan_player/component/audio_columns.dart';
 import 'package:dan_player/component/music_grid.dart';
 import 'package:dan_player/component/playing_audio_list_row.dart';
 import 'package:dan_player/component/app_toolbar_style.dart';
+import 'package:dan_player/utils.dart';
 import 'package:dan_player/library/collection.dart';
 import 'package:dan_player/library/audio_library.dart';
 import 'package:dan_player/online/online_library.dart';
@@ -111,10 +112,16 @@ class _AudiosPageState extends State<AudiosPage> {
 
   Widget _buildPage(BuildContext context) {
     final contentList = List<Audio>.from(AudioLibrary.instance.audioCollection);
+    final totalDuration = formatCollectionDurationSeconds(
+      sumKnownDurationSeconds(contentList.map((a) => a.duration)),
+    );
     return UniPage<Audio>(
       pref: AppPreference.instance.audiosPagePref,
       title: ui("音乐"),
-      subtitle: ui("{0} 首乐曲", [contentList.length]),
+      subtitle: [
+        ui("{0} 首乐曲", [contentList.length]),
+        if (totalDuration != null) totalDuration,
+      ].join(' · '),
       contentList: contentList,
       contentBuilder: (context, item, i, multiSelectController) {
         final tile = AudioTile(

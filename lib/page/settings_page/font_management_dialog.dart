@@ -110,6 +110,7 @@ class _FontManagementDialogState extends State<FontManagementDialog> {
   }
 
   Widget _slot(UiLanguage? language) {
+    final scheme = Theme.of(context).colorScheme;
     final choice =
         language == null ? _draft.shared : _draft.choiceFor(language);
     final menuWidth =
@@ -117,54 +118,96 @@ class _FontManagementDialogState extends State<FontManagementDialog> {
     Widget menuLabel(String label) => ConstrainedBox(
         constraints: BoxConstraints(maxWidth: math.max(1.0, menuWidth - 64)),
         child: Text(label, softWrap: true));
+    final selectorButton = AppMenuAnchor(
+        style: MenuStyle(
+            shape: const WidgetStatePropertyAll(AppShape.surface),
+            maximumSize:
+                WidgetStatePropertyAll(Size(menuWidth, double.infinity))),
+        menuChildren: [
+          for (final font in appBundledFonts)
+            MenuItemButton(
+                key: ValueKey(
+                    'font-choice-${language?.code ?? 'all'}-${font.id}'),
+                leadingIcon: Icon(choice.id == font.id
+                    ? Icons.check
+                    : Icons.text_fields),
+                onPressed: _busy
+                    ? null
+                    : () => setState(() => _draft = _draft.withChoice(
+                        language, AppFontChoice.bundled(font.id))),
+                child: menuLabel(
+                    fontChoiceName(AppFontChoice.bundled(font.id)))),
+          const Divider(),
+          MenuItemButton(
+              leadingIcon: const Icon(Icons.folder_open),
+              onPressed: _busy ? null : () => _installed(language),
+              child: menuLabel(ui('选择已安装字体'))),
+        ],
+        builder: (_, controller, child) => OutlinedButton(
+            key: ValueKey('font-slot-${language?.code ?? 'all'}'),
+            onPressed: _busy
+                ? null
+                : () => controller.isOpen
+                    ? controller.close()
+                    : controller.open(),
+            child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.font_download_outlined,
+                          size: 18, color: scheme.primary),
+                      const SizedBox(width: 8),
+                      Flexible(
+                          child: Text(fontChoiceName(choice),
+                              textAlign: TextAlign.center,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis)),
+                      const SizedBox(width: 6),
+                      const Icon(Icons.expand_more_rounded, size: 20)
+                    ]))));
+    if (language == null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: LayoutBuilder(builder: (context, constraints) {
+          if (constraints.maxWidth >= 460 &&
+              MediaQuery.textScalerOf(context).scale(1) <= 1.4) {
+            return Row(children: [
+              Expanded(
+                child: Text(ui('所有语言'),
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w600)),
+              ),
+              const SizedBox(width: 16),
+              ConstrainedBox(
+                constraints:
+                    const BoxConstraints(minWidth: 200, maxWidth: 340),
+                child: selectorButton,
+              ),
+            ]);
+          }
+          return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(ui('所有语言'),
+                    style: Theme.of(context).textTheme.labelLarge),
+                const SizedBox(height: 6),
+                selectorButton,
+              ]);
+        }),
+      );
+    }
     return Padding(
         padding: const EdgeInsets.symmetric(vertical: 5),
         child:
             Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text(language?.nativeName ?? ui('所有语言'),
+          Text(language.nativeName,
               style: Theme.of(context).textTheme.labelLarge),
           const SizedBox(height: 5),
-          AppMenuAnchor(
-              style: MenuStyle(
-                  shape: const WidgetStatePropertyAll(AppShape.control),
-                  maximumSize:
-                      WidgetStatePropertyAll(Size(menuWidth, double.infinity))),
-              menuChildren: [
-                for (final font in appBundledFonts)
-                  MenuItemButton(
-                      key: ValueKey(
-                          'font-choice-${language?.code ?? 'all'}-${font.id}'),
-                      leadingIcon: Icon(choice.id == font.id
-                          ? Icons.check
-                          : Icons.text_fields),
-                      onPressed: _busy
-                          ? null
-                          : () => setState(() => _draft = _draft.withChoice(
-                              language, AppFontChoice.bundled(font.id))),
-                      child: menuLabel(
-                          fontChoiceName(AppFontChoice.bundled(font.id)))),
-                const Divider(),
-                MenuItemButton(
-                    leadingIcon: const Icon(Icons.folder_open),
-                    onPressed: _busy ? null : () => _installed(language),
-                    child: menuLabel(ui('选择已安装字体'))),
-              ],
-              builder: (_, controller, child) => OutlinedButton(
-                  key: ValueKey('font-slot-${language?.code ?? 'all'}'),
-                  onPressed: _busy
-                      ? null
-                      : () => controller.isOpen
-                          ? controller.close()
-                          : controller.open(),
-                  child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 9),
-                      child: Row(children: [
-                        Expanded(
-                            child: Text(fontChoiceName(choice),
-                                maxLines: 2, overflow: TextOverflow.ellipsis)),
-                        const SizedBox(width: 8),
-                        const Icon(Icons.expand_more)
-                      ])))),
+          selectorButton,
         ]));
   }
 

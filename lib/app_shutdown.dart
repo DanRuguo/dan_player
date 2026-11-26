@@ -5,6 +5,7 @@ import 'package:dan_player/hotkeys_helper.dart';
 import 'package:dan_player/library/collection.dart';
 import 'package:dan_player/library/library_auto_refresh.dart';
 import 'package:dan_player/library/playlist.dart';
+import 'package:dan_player/log/app_log_service.dart';
 import 'package:dan_player/lyric/lyric_source.dart';
 import 'package:dan_player/play_service/play_service.dart';
 import 'package:dan_player/search/search_history.dart';
@@ -147,6 +148,9 @@ Future<void> _shutdownAndCloseWindow() async {
   } catch (err, trace) {
     LOGGER.e(err, stackTrace: trace);
   }
+  await AppLogService.instance
+      .flush()
+      .timeout(const Duration(milliseconds: 500), onTimeout: () {});
   try {
     await windowManager.setPreventClose(false);
     await windowManager.close();

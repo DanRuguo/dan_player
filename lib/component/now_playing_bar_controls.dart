@@ -39,7 +39,7 @@ class NowPlayingBarControls extends StatelessWidget {
       fixedSize: const Size.square(44),
       padding: EdgeInsets.zero,
       foregroundColor: scheme.primary,
-      shape: AppShape.control,
+      shape: AppShape.pill,
       visualDensity: VisualDensity.standard,
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
@@ -51,6 +51,7 @@ class NowPlayingBarControls extends StatelessWidget {
           style: style,
           onPressed: onPrevious,
           icon: const Icon(Symbols.skip_previous)),
+      const SizedBox(width: 2),
       _TactilePlayPauseButton(
         key: const ValueKey('bar-play-pause'),
         isPlaying: isPlaying,
@@ -63,22 +64,31 @@ class NowPlayingBarControls extends StatelessWidget {
                 : ui('播放'),
         onPressed: isBuffering ? null : onPlayPause,
         style: style.copyWith(
+            minimumSize: const WidgetStatePropertyAll(Size(50, 42)),
+            fixedSize: const WidgetStatePropertyAll(Size(50, 42)),
+            shape: const WidgetStatePropertyAll(AppShape.pill),
+            side: WidgetStateProperty.resolveWith((states) =>
+                states.contains(WidgetState.disabled)
+                    ? BorderSide.none
+                    : BorderSide(color: scheme.primary.withValues(alpha: .20))),
             backgroundColor: WidgetStateProperty.resolveWith((states) =>
                 states.contains(WidgetState.disabled)
                     ? scheme.onSurface.withValues(alpha: .12)
-                    : scheme.primaryContainer.withValues(alpha: .86)),
+                    : scheme.primaryContainer.withValues(alpha: .92)),
             foregroundColor: WidgetStateProperty.resolveWith((states) =>
                 states.contains(WidgetState.disabled)
                     ? scheme.onSurface.withValues(alpha: .38)
                     : scheme.onPrimaryContainer)),
       ),
+      const SizedBox(width: 2),
       IconButton(
           key: const ValueKey('bar-next'),
           tooltip: ui('下一首'),
           style: style,
           onPressed: onNext,
           icon: const Icon(Symbols.skip_next)),
-      if (showQueue)
+      if (showQueue) ...[
+        const SizedBox(width: 2),
         KeyedSubtree(
           key: queueTargetKey,
           child: Semantics(
@@ -89,12 +99,15 @@ class NowPlayingBarControls extends StatelessWidget {
                 style: queueExpanded
                     ? style.copyWith(
                         backgroundColor: WidgetStatePropertyAll(
-                            scheme.primaryContainer.withValues(alpha: .6)))
+                            scheme.secondaryContainer.withValues(alpha: .72)),
+                        foregroundColor:
+                            WidgetStatePropertyAll(scheme.onSecondaryContainer))
                     : style,
                 onPressed: onQueue,
                 icon: const Icon(Symbols.queue_music)),
           ),
         ),
+      ],
     ]);
   }
 }

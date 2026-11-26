@@ -210,6 +210,23 @@ std::wstring Tooltip(const std::string& title) {
   return result;
 }
 
+std::wstring SanitizeDisplayLine(std::wstring text) {
+  for (auto& ch : text) {
+    if (ch < L' ' || ch == 0x7f) ch = L' ';
+  }
+  const auto first = text.find_first_not_of(L' ');
+  if (first == std::wstring::npos) return {};
+  const auto last = text.find_last_not_of(L' ');
+  text = text.substr(first, last - first + 1);
+  if (text.size() > 240) {
+    text.resize(240);
+    if (!text.empty() && text.back() >= 0xd800 && text.back() <= 0xdbff) {
+      text.pop_back();
+    }
+  }
+  return text;
+}
+
 bool SystemHighContrast() {
   HIGHCONTRASTW contrast{sizeof(contrast), 0, nullptr};
   return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast),
@@ -318,6 +335,7 @@ struct DesktopIntegrationController::Impl
   ITaskbarList3* taskbar = nullptr;
   std::array<HICON, 4> icons{};
   HICON tray_icon = nullptr;
+  HICON popup_app_icon = nullptr;
   UINT taskbar_created = 0;
   UINT taskbar_button_created = 0;
   UINT state_message = 0;
@@ -330,6 +348,9 @@ struct DesktopIntegrationController::Impl
   TaskbarLyrics taskbar_lyric_surface;
   std::optional<TaskbarLyricsLayout> last_taskbar_lyric_layout;
   std::wstring tooltip = L"Dan Player";
+  std::wstring track_title;
+  std::wstring track_artist;
+  thumbnail::Image tray_cover_image;
   std::array<std::wstring, 8> labels{
       L"\u663e\u793a\u4e3b\u7a97\u53e3", L"\u8ff7\u4f60\u64ad\u653e\u5668",
       L"\u4e0a\u4e00\u9996", L"\u64ad\u653e", L"\u6682\u505c",
@@ -357,7 +378,8 @@ struct DesktopIntegrationController::Impl
   bool menu_opening = false;
   HWND menu_window = nullptr;
   int menu_hovered = -1;
-  int menu_focused = 0;
+  int menu_focused = -1;
+  bool menu_keyboard_nav = false;
   bool menu_tracking = false;
   bool custom_menu_paint_failed = false;
   policy::PopupPaintBuffer popup_paint;
@@ -710,6 +732,43 @@ struct DesktopIntegrationController::Impl
       } else {
         result->Success();
       }
+    } else if (method == "setTrayCover") {
+      std::int64_t width = 0;
+      std::int64_t height = 0;
+      const std::vector<std::uint8_t>* pixels = nullptr;
+      if (args) {
+        const auto found = args->find(EncodableValue("pixels"));
+        if (found != args->end()) {
+          pixels = std::get_if<std::vector<std::uint8_t>>(&found->second);
+        }
+      }
+      if (!args || !ReadThumbnailDimension(*args, "width", &width) ||
+          !ReadThumbnailDimension(*args, "height", &height) || !pixels ||
+          width != height || width > 256 ||
+          !thumbnail::ValidPayload(width, height, pixels->size())) {
+        result->Error("INVALID_ARGUMENT",
+                      "Tray cover must be square raw RGBA, 1..256 per axis");
+        return;
+      }
+      const auto updated = tray_cover_image.Set(width, height, *pixels);
+      if (updated == thumbnail::Update::kOutOfMemory ||
+          updated == thumbnail::Update::kInvalid) {
+        result->Error("COVER_UNAVAILABLE", "Unable to cache tray cover pixels");
+        return;
+      }
+      if (!disposed && menu_window && updated == thumbnail::Update::kChanged) {
+        RECT dirty = menu_layout.cover_rect;
+        InflateRect(&dirty, Scale(2), Scale(2));
+        InvalidateRect(menu_window, &dirty, FALSE);
+      }
+      result->Success();
+    } else if (method == "clearTrayCover") {
+      if (tray_cover_image.Clear() && !disposed && menu_window) {
+        RECT dirty = menu_layout.cover_rect;
+        InflateRect(&dirty, Scale(2), Scale(2));
+        InvalidateRect(menu_window, &dirty, FALSE);
+      }
+      result->Success();
     } else if (method == "updatePlayback") {
       policy::Playback next;
       if (!args || !ReadBool(*args, "ready", &next.ready) ||
@@ -733,11 +792,46 @@ struct DesktopIntegrationController::Impl
         tooltip = next_tooltip;
         EnsureTray();
       }
+      std::wstring next_track_title, next_track_artist;
+      const bool has_explicit_title =
+          ReadWideString(*args, "trackTitle", 4096, &next_track_title);
+      ReadWideString(*args, "trackArtist", 4096, &next_track_artist);
+      if (!has_explicit_title && title && !title->empty() &&
+          title->size() <= 4096) {
+        std::wstring decoded;
+        const int count = MultiByteToWideChar(
+            CP_UTF8, MB_ERR_INVALID_CHARS, title->data(),
+            static_cast<int>(title->size()), nullptr, 0);
+        if (count > 0) {
+          decoded.resize(static_cast<size_t>(count));
+          MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, title->data(),
+                              static_cast<int>(title->size()), decoded.data(),
+                              count);
+          const auto sep = decoded.find(L" \u2014 ");
+          if (sep != std::wstring::npos) {
+            next_track_title = decoded.substr(0, sep);
+            next_track_artist = decoded.substr(sep + 3);
+          } else {
+            next_track_title = std::move(decoded);
+          }
+        }
+      }
+      if (!next.has_track) {
+        next_track_title.clear();
+        next_track_artist.clear();
+      } else {
+        next_track_title = SanitizeDisplayLine(std::move(next_track_title));
+        next_track_artist = SanitizeDisplayLine(std::move(next_track_artist));
+      }
+      const bool header_changed =
+          next_track_title != track_title || next_track_artist != track_artist;
+      track_title = std::move(next_track_title);
+      track_artist = std::move(next_track_artist);
+
       UpdateButtons();
-      // State updates are infrequent and may change every row (enabled state,
-      // toggle glyph, check mark) plus the title. Hover remains row-local.
-      if (!disposed && menu_window && (playback_changed || title_changed)) {
-        if (title_changed) RefreshMenuAppearance(true);
+      if (!disposed && menu_window &&
+          (playback_changed || title_changed || header_changed)) {
+        if (title_changed || header_changed) RefreshMenuAppearance(true);
         else InvalidateRect(menu_window, nullptr, FALSE);
       }
       result->Success();
@@ -986,6 +1080,15 @@ struct DesktopIntegrationController::Impl
       if (tray_icon) DestroyIcon(tray_icon);
       tray_icon = replacement_tray;
     }
+    const int large_edge =
+        std::clamp(GetSystemMetricsForDpi(SM_CXICON, dpi), 32, 128);
+    HICON replacement_popup = static_cast<HICON>(
+        LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP_ICON),
+                   IMAGE_ICON, large_edge, large_edge, LR_DEFAULTCOLOR));
+    if (replacement_popup) {
+      if (popup_app_icon) DestroyIcon(popup_app_icon);
+      popup_app_icon = replacement_popup;
+    }
   }
 
   void EnsureTray() {
@@ -1141,27 +1244,42 @@ struct DesktopIntegrationController::Impl
     const wchar_t* label;
     policy::PopupIcon icon;
     bool separator;
+    bool transport;
   };
 
-  std::array<PopupItem, 9> PopupItems() const {
-    return {{{policy::kShowMain, labels[0].c_str(),
-              policy::PopupIconForAction(policy::Action::kShowMain), false},
-             {policy::kShowMini, labels[1].c_str(),
-              policy::PopupIconForAction(policy::Action::kShowMini), false},
-             {0, L"", policy::PopupIcon::kNone, true},
-             {policy::kPrevious, labels[2].c_str(),
-              policy::PopupIconForAction(policy::Action::kPrevious), false},
-             {policy::kToggle,
-              labels[playback.playing ? 4 : 3].c_str(),
-              policy::PopupIconForAction(policy::Action::kToggle), false},
+  std::wstring HeaderTitle() const {
+    if (playback.has_track && !track_title.empty()) return track_title;
+    return L"Dan Player";
+  }
+
+  std::wstring HeaderCaption() const {
+    if (playback.has_track) {
+      if (!track_artist.empty()) return track_artist;
+      return L"Dan Player";
+    }
+    return kPublisherCaption;
+  }
+
+  std::array<PopupItem, 8> PopupItems() const {
+    return {{{policy::kPrevious, labels[2].c_str(),
+              policy::PopupIconForAction(policy::Action::kPrevious), false,
+              true},
+             {policy::kToggle, labels[playback.playing ? 4 : 3].c_str(),
+              policy::PopupIconForAction(policy::Action::kToggle), false, true},
              {policy::kNext, labels[5].c_str(),
-              policy::PopupIconForAction(policy::Action::kNext), false},
-             {policy::kDesktopLyrics, labels[6].c_str(),
-              policy::PopupIconForAction(policy::Action::kDesktopLyrics),
+              policy::PopupIconForAction(policy::Action::kNext), false, true},
+             {policy::kShowMain, labels[0].c_str(),
+              policy::PopupIconForAction(policy::Action::kShowMain), false,
               false},
-             {0, L"", policy::PopupIcon::kNone, true},
+             {policy::kShowMini, labels[1].c_str(),
+              policy::PopupIconForAction(policy::Action::kShowMini), false,
+              false},
+             {policy::kDesktopLyrics, labels[6].c_str(),
+              policy::PopupIconForAction(policy::Action::kDesktopLyrics), false,
+              false},
+             {0, L"", policy::PopupIcon::kNone, true, false},
              {policy::kExit, labels[7].c_str(),
-              policy::PopupIconForAction(policy::Action::kExit), false}}};
+              policy::PopupIconForAction(policy::Action::kExit), false, false}}};
   }
 
   int Scale(int value) const {
@@ -1169,13 +1287,17 @@ struct DesktopIntegrationController::Impl
   }
 
   RECT PopupItemRect(int target, int width) const {
-    int top = menu_layout.header_height;
+    if (target == 0) return menu_layout.prev_rect;
+    if (target == 1) return menu_layout.toggle_rect;
+    if (target == 2) return menu_layout.next_rect;
     const auto items = PopupItems();
-    for (int index = 0; index < static_cast<int>(items.size()); ++index) {
+    if (target < 3 || target >= static_cast<int>(items.size())) return RECT{};
+    int top = menu_layout.list_top;
+    for (int index = 3; index < static_cast<int>(items.size()); ++index) {
       const int height = items[index].separator ? menu_layout.separator_height
-                                               : menu_layout.row_height;
+                                                : menu_layout.row_height;
       if (index == target) {
-        return RECT{Scale(8), top, width - Scale(8), top + height};
+        return RECT{Scale(6), top, width - Scale(6), top + height};
       }
       top += height;
     }
@@ -1203,109 +1325,318 @@ struct DesktopIntegrationController::Impl
 
   int NextPopupItem(int from, int direction) const {
     const auto items = PopupItems();
-    int current = from;
-    for (size_t attempt = 0; attempt < items.size(); ++attempt) {
-      current = (current + direction + static_cast<int>(items.size())) %
-                static_cast<int>(items.size());
+    const int total = static_cast<int>(items.size());
+    int current = from < 0 ? (direction > 0 ? -1 : 0) : from;
+    for (int attempt = 0; attempt < total; ++attempt) {
+      current = (current + direction + total) % total;
       if (!items[current].separator && PopupAllows(current)) return current;
     }
-    return from;
+    return -1;
+  }
+
+  void ApplyPopupWindowFrame(HWND popup, int width, int height) const {
+    constexpr DWORD kDwmUseImmersiveDarkMode = 20;
+    constexpr DWORD kDwmWindowCornerPreference = 33;
+    constexpr DWORD kDwmRoundCorner = 2;  // DWMWCP_ROUND
+    const BOOL dark = dark_mode ? TRUE : FALSE;
+    DwmSetWindowAttribute(popup, kDwmUseImmersiveDarkMode, &dark, sizeof(dark));
+    const DWORD corner_pref = kDwmRoundCorner;
+    if (SUCCEEDED(DwmSetWindowAttribute(popup, kDwmWindowCornerPreference,
+                                        &corner_pref, sizeof(corner_pref)))) {
+      SetWindowRgn(popup, nullptr, FALSE);
+      return;
+    }
+    const int diameter = Scale(16);
+    HRGN region =
+        CreateRoundRectRgn(0, 0, width + 1, height + 1, diameter, diameter);
+    if (region && !SetWindowRgn(popup, region, TRUE)) DeleteObject(region);
   }
 
   void DrawMaterialMenu(HDC dc) {
     RECT client{};
     GetClientRect(menu_window, &client);
-    const COLORREF background = BlendColor(accent,
-        dark_mode ? RGB(38, 38, 42) : RGB(250, 249, 252), dark_mode ? 16 : 10);
-    const COLORREF foreground = policy::ContrastAdjustedAccent(BlendColor(accent,
-        dark_mode ? RGB(245, 243, 247) : RGB(35, 32, 37), 48), background);
-    const COLORREF secondary = policy::ContrastAdjustedAccent(BlendColor(accent,
-        dark_mode ? RGB(198, 194, 201) : RGB(91, 86, 94), 40), background);
+    const COLORREF background = BlendColor(
+        accent, dark_mode ? RGB(28, 28, 33) : RGB(251, 250, 253),
+        dark_mode ? 14 : 8);
+    const COLORREF foreground = policy::ContrastAdjustedAccent(
+        BlendColor(accent, dark_mode ? RGB(245, 243, 248) : RGB(26, 24, 30), 18),
+        background);
+    const COLORREF secondary = policy::ContrastAdjustedAccent(
+        BlendColor(accent, dark_mode ? RGB(178, 174, 186) : RGB(104, 99, 112),
+                   24),
+        background, 3.8);
     const COLORREF disabled =
-        dark_mode ? RGB(112, 109, 114) : RGB(160, 156, 162);
+        dark_mode ? RGB(104, 101, 110) : RGB(168, 164, 173);
+
     SetDCBrushColor(dc, background);
     FillRect(dc, &client, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
     popup_blur.Draw(dc, client, background);
+
+    Gdiplus::Graphics g(dc);
+    g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+
+    // Subtle outer hairline border for crisp separation on any wallpaper.
+    policy::FillSmoothRoundRect(
+        g, client, static_cast<float>(Scale(8)), Gdiplus::Color(0, 0, 0, 0),
+        policy::GdipColorFromColorRef(
+            BlendColor(accent, dark_mode ? RGB(255, 255, 255) : RGB(0, 0, 0),
+                       42),
+            dark_mode ? 34 : 20),
+        1.0f);
+
+    // Hero Now-Playing & Media Transport Card.
+    const COLORREF card_bg = BlendColor(
+        accent, dark_mode ? RGB(40, 40, 47) : RGB(243, 241, 246),
+        dark_mode ? 26 : 18);
+    policy::FillSmoothRoundRect(
+        g, menu_layout.card_rect, static_cast<float>(Scale(12)),
+        policy::GdipColorFromColorRef(card_bg),
+        policy::GdipColorFromColorRef(accent, dark_mode ? 42 : 24), 1.0f);
+
+    // Artwork or refined vinyl / app-icon emblem.
+    std::vector<std::uint8_t> cover_bgra;
+    int cover_px = 0;
+    if (playback.has_track && tray_cover_image.size().valid()) {
+      const int target_edge = std::min(
+          {static_cast<int>(menu_layout.cover_rect.right -
+                            menu_layout.cover_rect.left),
+           tray_cover_image.size().width, tray_cover_image.size().height});
+      if (target_edge > 0) {
+        cover_bgra.resize(static_cast<std::size_t>(target_edge) * target_edge *
+                          4);
+        if (tray_cover_image.WriteBgra({target_edge, target_edge},
+                                       cover_bgra.data(), cover_bgra.size())) {
+          cover_px = target_edge;
+        } else {
+          cover_bgra.clear();
+        }
+      }
+    }
+    policy::PaintTrayArtworkBadge(
+        dc, g, menu_layout.cover_rect, static_cast<float>(Scale(9)),
+        cover_px > 0 ? cover_bgra.data() : nullptr, cover_px,
+        popup_app_icon ? popup_app_icon : tray_icon, accent, card_bg, dark_mode,
+        playback.has_track);
+
     SetBkMode(dc, TRANSPARENT);
     popup_fonts.Ensure(menu_dpi);
-    const auto old_font = SelectObject(dc, popup_fonts.ForText(dc, tooltip.c_str(), true));
-    SetTextColor(dc, foreground);
-    RECT title{Scale(18), menu_layout.title_top, client.right - Scale(18),
-               menu_layout.title_top + menu_layout.title_height};
-    DrawTextW(dc, tooltip.c_str(), -1, &title, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
-    SelectObject(dc, popup_fonts.ForText(dc, kPublisherCaption));
-    SetTextColor(dc, secondary);
-    RECT caption{Scale(18), menu_layout.caption_top, client.right - Scale(18),
-                 menu_layout.caption_top + menu_layout.caption_height};
-    DrawTextW(dc, kPublisherCaption, -1, &caption, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+    const std::wstring header_title = HeaderTitle();
+    const std::wstring header_caption = HeaderCaption();
+    const auto old_font = SelectObject(
+        dc, popup_fonts.ForRole(dc, header_title.c_str(),
+                                policy::PopupFonts::TextRole::kTitle));
+    SetTextColor(dc, policy::ContrastAdjustedAccent(foreground, card_bg));
+    RECT title_rc = menu_layout.title_rect;
+    DrawTextW(dc, header_title.c_str(), -1, &title_rc,
+              DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+
+    SelectObject(dc,
+                 popup_fonts.ForRole(dc, header_caption.c_str(),
+                                     policy::PopupFonts::TextRole::kCaption));
+    SetTextColor(dc, policy::ContrastAdjustedAccent(secondary, card_bg, 3.6));
+    RECT caption_rc = menu_layout.caption_rect;
+    DrawTextW(dc, header_caption.c_str(), -1, &caption_rc,
+              DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+
+    // Subtle divider between metadata and transport buttons inside card.
+    {
+      const float sep_y =
+          static_cast<float>(menu_layout.prev_rect.top - Scale(5)) + 0.5f;
+      Gdiplus::Pen card_sep(
+          policy::GdipColorFromColorRef(foreground, dark_mode ? 20 : 14), 1.0f);
+      g.DrawLine(&card_sep, static_cast<float>(menu_layout.prev_rect.left),
+                 sep_y, static_cast<float>(menu_layout.next_rect.right), sep_y);
+    }
 
     const auto items = PopupItems();
     for (int index = 0; index < static_cast<int>(items.size()); ++index) {
       RECT row = PopupItemRect(index, client.right);
       if (items[index].separator) {
-        const auto old_pen = SelectObject(dc, GetStockObject(DC_PEN));
-        SetDCPenColor(dc, BlendColor(foreground, background, 30));
-        const int y = (row.top + row.bottom) / 2;
-        MoveToEx(dc, Scale(16), y, nullptr);
-        LineTo(dc, client.right - Scale(16), y);
-        SelectObject(dc, old_pen);
+        const float y = static_cast<float>(row.top + row.bottom) * 0.5f;
+        Gdiplus::Pen sep_pen(
+            policy::GdipColorFromColorRef(foreground, dark_mode ? 26 : 18),
+            1.0f);
+        g.DrawLine(&sep_pen, static_cast<float>(Scale(16)), y,
+                   static_cast<float>(client.right - Scale(16)), y);
         continue;
       }
+
       const bool enabled = PopupAllows(index);
-      const bool highlighted = enabled &&
-                               (index == menu_hovered || index == menu_focused);
-      const COLORREF row_background = highlighted
-          ? BlendColor(accent, background, dark_mode ? 58 : 38) : background;
-      if (highlighted) {
-        const auto old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
-        const auto old_brush = SelectObject(dc, GetStockObject(DC_BRUSH));
-        SetDCBrushColor(dc, row_background);
-        RoundRect(dc, row.left, row.top + Scale(2), row.right,
-                  row.bottom - Scale(2), Scale(12), Scale(12));
-        SelectObject(dc, old_brush);
-        SelectObject(dc, old_pen);
-      }
-      const COLORREF item_color = enabled
-          ? policy::ContrastAdjustedAccent(foreground, row_background) : disabled;
-      const COLORREF capsule_color = policy::TrayIconCapsuleColor(accent, row_background, dark_mode, enabled);
-      const COLORREF icon_color = !enabled ? disabled
-          : items[index].id == policy::kExit ? policy::ContrastAdjustedAccent(item_color, capsule_color)
-          : policy::ContrastAdjustedAccent(accent, capsule_color);
-      const int material_index = policy::PopupMaterialIndex(items[index].icon, playback.playing);
-      const bool material = popup_fonts.material_icons_loaded() && material_index >= 0 &&
-                               material_glyphs[material_index] != 0;
-      const wchar_t glyph = material
-          ? material_glyphs[material_index] : policy::PopupGlyph(items[index].icon, playback.playing);
-      const auto capsule = policy::TrayIconCapsuleRect(row, menu_dpi);
-      policy::PaintTrayIconCapsule(dc, capsule, popup_fonts.icons(material), glyph,
-                                    capsule_color, icon_color);
-      SelectObject(dc, popup_fonts.ForText(dc, items[index].label));
-      SetTextColor(dc, item_color);
-      RECT label{row.left + Scale(48), row.top,
-                 row.right - Scale(34), row.bottom};
-      DrawTextW(dc, items[index].label, -1, &label, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
-      if (items[index].id == policy::kDesktopLyrics &&
-          playback.desktop_lyrics) {
-        if (popup_fonts.material_icons_loaded() && material_glyphs[8]) {
-          SelectObject(dc, popup_fonts.icons());
-          RECT checked{row.right - Scale(30), row.top, row.right - Scale(8), row.bottom};
-          SetTextColor(dc, icon_color);
-          DrawTextW(dc, &material_glyphs[8], 1, &checked,
-                      DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_NOPREFIX);
+      const bool hovered = enabled && index == menu_hovered;
+      const bool kb_focused =
+          enabled && menu_keyboard_nav && index == menu_focused;
+      const bool highlighted = hovered || kb_focused;
+
+      const int material_index =
+          policy::PopupMaterialIndex(items[index].icon, playback.playing);
+      const bool material = popup_fonts.material_icons_loaded() &&
+                            material_index >= 0 &&
+                            material_glyphs[material_index] != 0;
+      const wchar_t glyph =
+          material ? material_glyphs[material_index]
+                   : policy::PopupGlyph(items[index].icon, playback.playing);
+
+      if (items[index].transport) {
+        if (items[index].id == policy::kToggle) {
+          // Center hero Play / Pause pill button.
+          const int mix = !enabled       ? (dark_mode ? 12 : 8)
+                          : highlighted  ? (dark_mode ? 128 : 68)
+                          : playback.playing ? (dark_mode ? 98 : 50)
+                                             : (dark_mode ? 74 : 36);
+          const COLORREF pill_bg =
+              BlendColor(enabled ? accent : foreground, card_bg, mix);
+          const float pill_r =
+              static_cast<float>(row.bottom - row.top) * 0.5f;
+          const Gdiplus::Color pill_border =
+              kb_focused ? policy::GdipColorFromColorRef(accent, 225)
+              : enabled  ? policy::GdipColorFromColorRef(
+                               accent, highlighted ? 140 : (dark_mode ? 84 : 48))
+                         : Gdiplus::Color(0, 0, 0, 0);
+          policy::FillSmoothRoundRect(g, row, pill_r,
+                                      policy::GdipColorFromColorRef(pill_bg),
+                                      pill_border, kb_focused ? 1.4f : 1.0f);
+          const COLORREF pill_fg =
+              enabled ? policy::ContrastAdjustedAccent(accent, pill_bg, 4.6)
+                      : disabled;
+
+          HFONT label_font = popup_fonts.ForRole(
+              dc, items[index].label, policy::PopupFonts::TextRole::kPill);
+          SelectObject(dc, label_font);
+          RECT measure_rc{};
+          DrawTextW(dc, items[index].label, -1, &measure_rc,
+                    DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
+          const int icon_w = Scale(20);
+          const int gap = Scale(4);
+          const int max_text_w =
+              std::max(0, static_cast<int>(row.right - row.left) - icon_w - gap -
+                              Scale(14));
+          const int text_w =
+              std::min(max_text_w, static_cast<int>(measure_rc.right));
+          const int group_w = icon_w + gap + text_w;
+          const int start_x =
+              row.left + (static_cast<int>(row.right - row.left) - group_w) / 2;
+          RECT icon_rc{start_x, row.top, start_x + icon_w, row.bottom};
+          policy::PaintCenteredGlyph(dc, icon_rc, popup_fonts.icons(material),
+                                     glyph, pill_fg);
+          SelectObject(dc, label_font);
+          SetTextColor(dc, pill_fg);
+          RECT text_rc{icon_rc.right + gap, row.top,
+                       icon_rc.right + gap + text_w, row.bottom};
+          DrawTextW(dc, items[index].label, -1, &text_rc,
+                    DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
         } else {
-        const auto old_pen = SelectObject(dc, GetStockObject(DC_PEN));
-        SetDCPenColor(dc, icon_color);
-        const int middle = (row.top + row.bottom) / 2;
-        MoveToEx(dc, row.right - Scale(25), middle, nullptr);
-        LineTo(dc, row.right - Scale(20), middle + Scale(5));
-        LineTo(dc, row.right - Scale(12), middle - Scale(5));
-        SelectObject(dc, old_pen);
+          // Prev / Next tactile side buttons.
+          const COLORREF btn_bg =
+              highlighted
+                  ? BlendColor(accent, card_bg, dark_mode ? 64 : 38)
+                  : (enabled ? BlendColor(foreground, card_bg,
+                                          dark_mode ? 15 : 9)
+                             : card_bg);
+          const Gdiplus::Color btn_border =
+              kb_focused ? policy::GdipColorFromColorRef(accent, 220)
+              : enabled  ? policy::GdipColorFromColorRef(
+                               foreground, dark_mode ? 20 : 12)
+                         : Gdiplus::Color(0, 0, 0, 0);
+          policy::FillSmoothRoundRect(
+              g, row, static_cast<float>(Scale(8)),
+              enabled || highlighted ? policy::GdipColorFromColorRef(btn_bg)
+                                     : Gdiplus::Color(0, 0, 0, 0),
+              btn_border, kb_focused ? 1.4f : 1.0f);
+          const COLORREF btn_fg =
+              !enabled ? disabled
+              : highlighted
+                  ? policy::ContrastAdjustedAccent(accent, btn_bg, 4.5)
+                  : policy::ContrastAdjustedAccent(foreground, btn_bg, 4.5);
+          policy::PaintCenteredGlyph(dc, row, popup_fonts.icons(material),
+                                     glyph, btn_fg);
         }
+        continue;
       }
-      if (index == menu_focused && GetFocus() == menu_window) {
-        RECT focus = row;
-        InflateRect(&focus, -Scale(5), -Scale(5));
-        DrawFocusRect(dc, &focus);
+
+      // Standard clean command row (no circular blob behind icon).
+      const bool is_exit = items[index].id == policy::kExit;
+      const bool is_active_lyrics =
+          items[index].id == policy::kDesktopLyrics && playback.desktop_lyrics;
+      const COLORREF highlight_tint = is_exit ? RGB(216, 56, 64) : accent;
+      const COLORREF row_bg =
+          highlighted
+              ? BlendColor(highlight_tint, background,
+                           is_exit ? (dark_mode ? 46 : 22)
+                                   : (dark_mode ? 48 : 26))
+              : background;
+      if (highlighted || kb_focused) {
+        RECT pill{row.left, row.top + Scale(1), row.right,
+                  row.bottom - Scale(1)};
+        const Gdiplus::Color border =
+            kb_focused ? policy::GdipColorFromColorRef(highlight_tint, 215)
+                       : Gdiplus::Color(0, 0, 0, 0);
+        policy::FillSmoothRoundRect(
+            g, pill, static_cast<float>(Scale(8)),
+            highlighted ? policy::GdipColorFromColorRef(row_bg)
+                        : Gdiplus::Color(0, 0, 0, 0),
+            border, 1.3f);
+      }
+
+      const COLORREF label_color =
+          !enabled ? disabled
+          : (is_exit && highlighted)
+              ? policy::ContrastAdjustedAccent(RGB(206, 48, 56), row_bg, 4.5)
+              : policy::ContrastAdjustedAccent(foreground, row_bg, 4.5);
+      const COLORREF icon_color =
+          !enabled ? disabled
+          : (is_exit && highlighted)
+              ? policy::ContrastAdjustedAccent(RGB(214, 52, 60), row_bg, 4.2)
+          : (highlighted || is_active_lyrics)
+              ? policy::ContrastAdjustedAccent(accent, row_bg, 4.2)
+              : policy::ContrastAdjustedAccent(
+                    BlendColor(accent, secondary, 128), row_bg, 3.6);
+
+      RECT icon_rc{row.left + Scale(8), row.top, row.left + Scale(34),
+                   row.bottom};
+      policy::PaintCenteredGlyph(dc, icon_rc, popup_fonts.icons(material),
+                                 glyph, icon_color);
+
+      SelectObject(dc, popup_fonts.ForRole(
+                           dc, items[index].label,
+                           policy::PopupFonts::TextRole::kRow));
+      SetTextColor(dc, label_color);
+      RECT label_rc{row.left + Scale(38), row.top,
+                    row.right - (is_active_lyrics ? Scale(34) : Scale(12)),
+                    row.bottom};
+      DrawTextW(dc, items[index].label, -1, &label_rc,
+                DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+
+      if (is_active_lyrics) {
+        const int badge_d = Scale(20);
+        const int cy = (row.top + row.bottom) / 2;
+        RECT badge_rc{row.right - Scale(10) - badge_d, cy - badge_d / 2,
+                      row.right - Scale(10), cy - badge_d / 2 + badge_d};
+        const COLORREF badge_bg =
+            BlendColor(accent, row_bg, dark_mode ? 76 : 36);
+        policy::FillSmoothRoundRect(g, badge_rc, badge_d * 0.5f,
+                                    policy::GdipColorFromColorRef(badge_bg));
+        const COLORREF check_fg =
+            policy::ContrastAdjustedAccent(accent, badge_bg, 4.2);
+        if (popup_fonts.material_icons_loaded() && material_glyphs[8]) {
+          policy::PaintCenteredGlyph(dc, badge_rc, popup_fonts.small_icons(),
+                                     material_glyphs[8], check_fg);
+        } else {
+          Gdiplus::Pen check_pen(policy::GdipColorFromColorRef(check_fg),
+                                 std::max(1.5f, Scale(2) * 0.85f));
+          check_pen.SetStartCap(Gdiplus::LineCapRound);
+          check_pen.SetEndCap(Gdiplus::LineCapRound);
+          check_pen.SetLineJoin(Gdiplus::LineJoinRound);
+          const float bx = static_cast<float>(badge_rc.left);
+          const float by = static_cast<float>(badge_rc.top);
+          const float bw = static_cast<float>(badge_d);
+          Gdiplus::PointF pts[3] = {
+              {bx + bw * 0.27f, by + bw * 0.52f},
+              {bx + bw * 0.44f, by + bw * 0.69f},
+              {bx + bw * 0.74f, by + bw * 0.34f},
+          };
+          g.DrawLines(&check_pen, pts, 3);
+        }
       }
     }
     SelectObject(dc, old_font);
@@ -1315,14 +1646,15 @@ struct DesktopIntegrationController::Impl
     if (!menu_window) return;
     RECT client{};
     GetClientRect(menu_window, &client);
-    const std::array<int, 4> changed{
-        old_hovered, old_focused, menu_hovered, menu_focused};
+    const std::array<int, 4> changed{old_hovered, old_focused, menu_hovered,
+                                     menu_focused};
     for (size_t i = 0; i < changed.size(); ++i) {
       if (changed[i] < 0) continue;
       bool duplicate = false;
       for (size_t j = 0; j < i; ++j) duplicate |= changed[j] == changed[i];
       if (duplicate) continue;
-      const RECT row = PopupItemRect(changed[i], client.right);
+      RECT row = PopupItemRect(changed[i], client.right);
+      InflateRect(&row, Scale(2), Scale(2));
       InvalidateRect(menu_window, &row, FALSE);
     }
   }
@@ -1336,18 +1668,14 @@ struct DesktopIntegrationController::Impl
 
   static LRESULT CALLBACK PopupWindowProc(HWND hwnd, UINT message,
                                            WPARAM wparam, LPARAM lparam) {
-    auto* self = reinterpret_cast<Impl*>(
-        GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    auto* self =
+        reinterpret_cast<Impl*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
       const auto* create = reinterpret_cast<CREATESTRUCTW*>(lparam);
       self = static_cast<Impl*>(create->lpCreateParams);
-      SetWindowLongPtrW(hwnd, GWLP_USERDATA,
-                        reinterpret_cast<LONG_PTR>(self));
+      SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
     }
     if (!self) return DefWindowProcW(hwnd, message, wparam, lparam);
-    // Releasing WinRT subscriptions on close may pump STA messages that
-    // destroy the owner/controller. Keep this callback's state alive until it
-    // returns; disposed still prevents actions or resources from resurfacing.
     const auto keep_alive = self->weak_from_this().lock();
     if (!keep_alive) return DefWindowProcW(hwnd, message, wparam, lparam);
     switch (message) {
@@ -1360,12 +1688,11 @@ struct DesktopIntegrationController::Impl
       case WM_PAINT: {
         PAINTSTRUCT paint{};
         HDC dc = BeginPaint(hwnd, &paint);
-        const bool painted = self->popup_paint.Paint(dc, paint.rcPaint,
+        const bool painted = self->popup_paint.Paint(
+            dc, paint.rcPaint,
             [self](HDC buffer) { self->DrawMaterialMenu(buffer); });
         EndPaint(hwnd, &paint);
         if (!painted) {
-          // Do not leave an erased/stale popup validated forever, nor reopen
-          // an unexpected menu after focus moved. Next invocation uses HMENU.
           self->custom_menu_paint_failed = true;
           DestroyWindow(hwnd);
         }
@@ -1378,10 +1705,11 @@ struct DesktopIntegrationController::Impl
         }
         POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
         const int next = self->PopupItemAt(point);
-        if (next != self->menu_hovered) {
+        if (next != self->menu_hovered || self->menu_keyboard_nav) {
           const int old_hovered = self->menu_hovered;
           const int old_focused = self->menu_focused;
           self->menu_hovered = next;
+          self->menu_keyboard_nav = false;
           if (self->PopupAllows(next)) self->menu_focused = next;
           self->InvalidatePopupSelection(old_hovered, old_focused);
         }
@@ -1389,28 +1717,62 @@ struct DesktopIntegrationController::Impl
       }
       case WM_MOUSELEAVE: {
         const int old_hovered = self->menu_hovered;
+        const int old_focused = self->menu_focused;
         self->menu_tracking = false;
         self->menu_hovered = -1;
-        self->InvalidatePopupSelection(old_hovered, self->menu_focused);
+        if (!self->menu_keyboard_nav) self->menu_focused = -1;
+        self->InvalidatePopupSelection(old_hovered, old_focused);
         return 0;
       }
       case WM_LBUTTONUP: {
         POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-        self->ActivatePopupItem(self->PopupItemAt(point));
+        const int hit = self->PopupItemAt(point);
+        if (hit >= 0) {
+          self->ActivatePopupItem(hit);
+        } else if (PtInRect(&self->menu_layout.info_hit_rect, point)) {
+          if (self->menu_window) DestroyWindow(self->menu_window);
+          if (!self->disposed) self->Emit(policy::Action::kShowMain);
+        }
         return 0;
       }
       case WM_KEYDOWN:
         if (wparam == VK_ESCAPE) {
           DestroyWindow(hwnd);
+        } else if (wparam == VK_LEFT || wparam == VK_RIGHT) {
+          const int old_hovered = self->menu_hovered;
+          const int old_focused = self->menu_focused;
+          self->menu_hovered = -1;
+          self->menu_keyboard_nav = true;
+          const int step = wparam == VK_RIGHT ? 1 : -1;
+          int candidate = self->menu_focused;
+          if (candidate < 0 || candidate > 2) {
+            candidate = wparam == VK_RIGHT ? -1 : 3;
+          }
+          for (int attempt = 0; attempt < 3; ++attempt) {
+            candidate = (candidate + step + 3) % 3;
+            if (self->PopupAllows(candidate)) {
+              self->menu_focused = candidate;
+              break;
+            }
+          }
+          if (self->menu_focused < 0) {
+            self->menu_focused = self->NextPopupItem(-1, 1);
+          }
+          self->InvalidatePopupSelection(old_hovered, old_focused);
         } else if (wparam == VK_DOWN || wparam == VK_UP) {
           const int old_hovered = self->menu_hovered;
           const int old_focused = self->menu_focused;
           self->menu_hovered = -1;
+          self->menu_keyboard_nav = true;
           self->menu_focused = self->NextPopupItem(
               self->menu_focused, wparam == VK_DOWN ? 1 : -1);
           self->InvalidatePopupSelection(old_hovered, old_focused);
         } else if (wparam == VK_RETURN || wparam == VK_SPACE) {
-          self->ActivatePopupItem(self->menu_focused);
+          if (self->menu_focused >= 0) {
+            self->ActivatePopupItem(self->menu_focused);
+          } else {
+            self->ActivatePopupItem(3);  // Default Enter opens main window.
+          }
         }
         return 0;
       case WM_ACTIVATE:
@@ -1423,6 +1785,7 @@ struct DesktopIntegrationController::Impl
         if (self->menu_window == hwnd) self->menu_window = nullptr;
         self->menu_open = false;
         self->menu_tracking = false;
+        self->menu_keyboard_nav = false;
         self->popup_paint.Clear();
         self->ClearPopupBlur();
         if (!self->disposed && self->tray_available) {
@@ -1457,71 +1820,73 @@ struct DesktopIntegrationController::Impl
     if (!GetMonitorInfoW(target, &monitor)) return false;
     menu_dpi = FlutterDesktopGetDpiForMonitor(target);
     if (menu_dpi == 0) menu_dpi = 96;
-    if (!menu_layout.Measure(popup_fonts, menu_dpi, tooltip, kPublisherCaption,
-                             labels, monitor.rcWork.right - monitor.rcWork.left)) return false;
+    if (!menu_layout.Measure(popup_fonts, menu_dpi, HeaderTitle(),
+                             HeaderCaption(), kPublisherCaption, labels,
+                             monitor.rcWork.right - monitor.rcWork.left)) {
+      return false;
+    }
     const int width = menu_layout.width, height = menu_layout.height;
     menu_anchor = anchor;
     RECT bounds{};
-    if (!policy::PlaceTrayPopup(anchor, width, height, monitor.rcWork, &bounds)) return false;
-    // Allocate before showing anything; use the accessible native menu if a
-    // complete atomic frame cannot be buffered (including very high DPI).
+    if (!policy::PlaceTrayPopup(anchor, width, height, monitor.rcWork,
+                                &bounds)) {
+      return false;
+    }
     if (!popup_paint.Open(width, height)) return false;
     ClearPopupBlur();
     if (tray_blur_radius > 0) {
       const double requested_radius = tray_blur_radius;
       const bool effects = popup_effects.Open(window, kTrayEffectsChanged);
-      // WinRT activation/subscription can pump messages, including shutdown
-      // or a new configuration. Never start a capture after that generation.
       if (disposed || !active || requested_radius != tray_blur_radius) {
         popup_paint.Clear();
         ClearPopupBlur();
         return false;
       }
-      // A display/contrast change could have arrived while WinRT activated.
-      // Re-resolve the final rectangle before any pixels are read.
       if (SystemHighContrast() || !GetMonitorInfoW(target, &monitor) ||
-          !policy::PlaceTrayPopup(anchor, width, height, monitor.rcWork, &bounds)) {
+          !policy::PlaceTrayPopup(anchor, width, height, monitor.rcWork,
+                                  &bounds)) {
         popup_paint.Clear();
         ClearPopupBlur();
         return false;
       }
-      // The HWND has not been created yet. Read ONLY its final rectangle once,
-      // without kernel padding or any full-screen staging image.
-      popup_blur.Open(bounds, monitor.rcWork, tray_blur_radius, menu_dpi,
-          policy::TrayBlurAllowed(SystemHighContrast(), effects, policy::TrayEnergySaver()),
+      popup_blur.Open(
+          bounds, monitor.rcWork, tray_blur_radius, menu_dpi,
+          policy::TrayBlurAllowed(SystemHighContrast(), effects,
+                                  policy::TrayEnergySaver()),
           [](HDC destination, const RECT& rect) {
             const HDC screen = GetDC(nullptr);
             if (!screen) return false;
-            const bool copied = BitBlt(destination, 0, 0,
-                rect.right - rect.left, rect.bottom - rect.top, screen,
-                rect.left, rect.top, SRCCOPY | CAPTUREBLT) != FALSE;
+            const bool copied =
+                BitBlt(destination, 0, 0, rect.right - rect.left,
+                       rect.bottom - rect.top, screen, rect.left, rect.top,
+                       SRCCOPY | CAPTUREBLT) != FALSE;
             ReleaseDC(nullptr, screen);
             return copied;
           });
       if (!popup_blur.ready()) ClearPopupBlur();
     }
     if (disposed || !active) {
-      popup_paint.Clear(); ClearPopupBlur(); return false;
+      popup_paint.Clear();
+      ClearPopupBlur();
+      return false;
     }
     HWND popup = CreateWindowExW(
         WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"DanPlayer.MaterialTrayPopup.26",
-        L"Dan Player", WS_POPUP, bounds.left, bounds.top, width, height, window, nullptr,
-        GetModuleHandleW(nullptr), this);
+        L"Dan Player", WS_POPUP, bounds.left, bounds.top, width, height, window,
+        nullptr, GetModuleHandleW(nullptr), this);
     if (!popup || disposed || !active || !IsWindow(popup)) {
       if (popup && IsWindow(popup)) DestroyWindow(popup);
       popup_paint.Clear();
       ClearPopupBlur();
       return false;
     }
-    const int radius = Scale(16);
-    HRGN region = CreateRoundRectRgn(0, 0, width + 1, height + 1,
-                                     radius, radius);
-    if (region && !SetWindowRgn(popup, region, TRUE)) DeleteObject(region);
+    ApplyPopupWindowFrame(popup, width, height);
     menu_window = popup;
     menu_open = true;
     menu_hovered = -1;
+    menu_focused = -1;
+    menu_keyboard_nav = false;
     menu_tracking = false;
-    menu_focused = NextPopupItem(-1, 1);
     ShowWindow(popup, SW_SHOWNORMAL);
     if (disposed || menu_window != popup) return true;
     SetForegroundWindow(popup);
@@ -1604,7 +1969,8 @@ struct DesktopIntegrationController::Impl
         policy::TrayPopupLayout next;
         RECT bounds{}, previous{};
         if (!GetMonitorInfoW(target, &monitor) ||
-            !next.Measure(popup_fonts, dpi, tooltip, kPublisherCaption, labels,
+            !next.Measure(popup_fonts, dpi, HeaderTitle(), HeaderCaption(),
+                          kPublisherCaption, labels,
                           monitor.rcWork.right - monitor.rcWork.left) ||
             !policy::PlaceTrayPopup(menu_anchor, next.width, next.height,
                                     monitor.rcWork, &bounds) ||
@@ -1616,19 +1982,17 @@ struct DesktopIntegrationController::Impl
         menu_dpi = dpi;
         menu_layout = next;
         if (!EqualRect(&bounds, &previous)) {
-          // A resized popup cannot reuse a desktop image captured for its old
-          // rectangle. Keep a solid theme background until the next opening.
           ClearPopupBlur();
-          const int radius = Scale(16);
-          HRGN region = CreateRoundRectRgn(0, 0, next.width + 1, next.height + 1,
-                                           radius, radius);
-          if (region && !SetWindowRgn(current, region, TRUE)) DeleteObject(region);
+          ApplyPopupWindowFrame(current, next.width, next.height);
           if (!SetWindowPos(current, nullptr, bounds.left, bounds.top,
-                            next.width, next.height, SWP_NOACTIVATE | SWP_NOZORDER)) {
+                            next.width, next.height,
+                            SWP_NOACTIVATE | SWP_NOZORDER)) {
             DestroyWindow(current);
             return;
           }
           if (disposed || menu_window != current) return;
+        } else {
+          ApplyPopupWindowFrame(current, next.width, next.height);
         }
       }
       // Never capture again over our own popup. A disabled effect retires the
@@ -1773,6 +2137,7 @@ struct DesktopIntegrationController::Impl
     SetPlaybackPower(false);
     active = false;
     ClearThumbnail();
+    tray_cover_image.Clear();
     const bool had_tray = std::exchange(tray_available, false);
     auto* old_taskbar = std::exchange(taskbar, nullptr);
     const bool had_buttons = shell.buttons_added;
@@ -1809,6 +2174,8 @@ struct DesktopIntegrationController::Impl
     }
     if (tray_icon) DestroyIcon(tray_icon);
     tray_icon = nullptr;
+    if (popup_app_icon) DestroyIcon(popup_app_icon);
+    popup_app_icon = nullptr;
   }
 };
 

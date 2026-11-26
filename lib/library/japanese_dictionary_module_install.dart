@@ -8,15 +8,19 @@ import 'package:dan_player/app_settings.dart';
 import 'package:dan_player/library/japanese_dictionary_runtime.dart';
 import 'package:dan_player/online/app_network_proxy.dart';
 import 'package:dan_player/taskbar_progress.dart';
+import 'package:dan_player/utils.dart';
 import 'package:path/path.dart' as p;
 
+// Starting from 26.1.2-snapshot.8, missing offline Japanese Kana dictionary
+// files download the compacted DANIPAD3 + DANJPSUP v2 archive published on
+// v26.1.2-snapshot.8, install into `tool/japanese_readings`, and re-verify.
 const japaneseDictionaryModuleName =
     'DanPlayer-JapaneseReadings-IPADIC-6.2.0.zip';
 const japaneseDictionaryModuleUrl =
-    'https://github.com/DanRuguo/dan_player/releases/download/v26.1.1/$japaneseDictionaryModuleName';
-const japaneseDictionaryModuleBytes = 10952592;
+    'https://github.com/DanRuguo/dan_player/releases/download/v26.1.2-snapshot.8/$japaneseDictionaryModuleName';
+const japaneseDictionaryModuleBytes = 7179733;
 const japaneseDictionaryModuleSha256 =
-    '036bfd033ee99dbfd5f96e4ccc555d6370b9d9ef360392adb684ec12a93e84c5';
+    '040bb497aaaccba031edc777714409669ed2ab86d4b74e74957fc5cec58cee65';
 
 typedef JapaneseDictionaryDownload = Future<void> Function(
     File destination, void Function(double?) progress, bool Function() active);
@@ -100,10 +104,14 @@ class JapaneseDictionaryModuleInstaller {
       _check();
       await unpacked.rename(target.path);
       committed = true;
+      onStage?.call('正在复检已安装字典组件…');
       _runtime.invalidate();
-      if (!await _runtime.ensure(force: true)) {
+      if (!await _runtime.validateDirectory(target.path) ||
+          !await _runtime.ensure(force: true)) {
         throw const JapaneseDictionaryUnavailable();
       }
+      LOGGER.i(
+          '[japanese_readings] Installed and verified dictionary module in ${target.path}');
       _check();
       previous = null;
       progress(1);
@@ -199,7 +207,7 @@ Future<void> extractJapaneseDictionaryModule(
   }
   const names = {
     japaneseDictionaryFileName,
-    'supplemental-reading-v1.json.gz',
+    'supplemental-reading-v2.bin.gz',
     'kanji-reading-v1.json.gz',
     'MODULE.json',
     'README.txt',

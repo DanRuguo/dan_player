@@ -2,27 +2,34 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+
 import 'package:archive/archive_io.dart';
 import 'package:crypto/crypto.dart';
-import 'package:path/path.dart' as p;
-import 'package:dan_player/library/ffmpeg_runtime.dart';
-import 'package:dan_player/taskbar_progress.dart';
 import 'package:dan_player/app_settings.dart';
+import 'package:dan_player/library/ffmpeg_runtime.dart';
 import 'package:dan_player/online/network_proxy_preferences.dart';
+import 'package:dan_player/taskbar_progress.dart';
+import 'package:dan_player/utils.dart';
+import 'package:path/path.dart' as p;
 
-// Keep the independently published, hash-pinned module on the 26.0.5 release.
-// Player snapshots must not require another copy of the same 70 MB archive.
+// Starting from 26.1.2-snapshot.8, missing FFmpeg tools download the slimmed
+// audio-focused module published on the v26.1.2-snapshot.8 release, install
+// into `tool/ffmpeg`, and immediately re-verify tool integrity & codecs.
+const ffmpegModuleName = 'DanPlayer-FFmpeg-7.1.1-audio-windows-x64.zip';
 const ffmpegModuleUrl =
-    'https://github.com/DanRuguo/dan_player/releases/download/v26.0.5/DanPlayer-FFmpeg-7.1.1-windows-x64.zip';
+    'https://github.com/DanRuguo/dan_player/releases/download/v26.1.2-snapshot.8/$ffmpegModuleName';
 const ffmpegModuleHash =
-    'd007d0d6ca34a0d69b9dfe3326c04914efe8fbf86e99d2c5b4a30ce580cceffa';
-const ffmpegModuleBytes = 73513838;
+    '818ff3f8970ec410f267901a557183c4b645c59d5ea920251b5049d38856a095';
+const ffmpegModuleBytes = 5462138;
+
+typedef FfmpegModuleDownload = Future<void> Function(
+    File destination, void Function(double?) progress, bool Function() active);
 
 /// Honors the app proxy selection. System mode delegates to Windows' web
 /// proxy (including PAC); no mode changes the machine proxy or prints secrets.
 /// The pinned hash is verified before extraction.
 const _downloadScript = r'''
-param([string]$Url,[string]$Destination,[string]$ProxyMode,[string]$ProxyUrl,[string]$UserAgent)
+param([string]$Url,[string]$Destination,[string]$ProxyMode,[string]$ProxyUrl,[string]$UserAgent,[long]$ExpectedBytes)
 $ErrorActionPreference='Stop'
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
 $response=$null
@@ -51,19 +58,28 @@ $downloadFile=[IO.File]::Open($Destination,[IO.FileMode]::CreateNew,[IO.FileAcce
 try {
   $buffer=New-Object byte[] 131072
   [long]$total=0;[long]$last=0
-  while($total -lt 73513838 -and ($count=$downloadStream.Read($buffer,0,$buffer.Length)) -gt 0) {
+  while($total -lt $ExpectedBytes -and ($count=$downloadStream.Read($buffer,0,$buffer.Length)) -gt 0) {
     $total+=$count
-    if($total -gt 73513838) { throw 'Unexpected download size' }
+    if($total -gt $ExpectedBytes) { throw 'Unexpected download size' }
     $downloadFile.Write($buffer,0,$count)
-    if($total-$last -ge 524288) { [Console]::WriteLine($total);$last=$total }
+    if($total-$last -ge 262144) { [Console]::WriteLine($total);$last=$total }
   }
+  if($total -ne $ExpectedBytes) { throw 'Incomplete FFmpeg module download' }
   [Console]::WriteLine($total)
 } finally { $downloadFile.Dispose();$request.Abort();$downloadStream.Dispose();$response.Dispose() }
 ''';
 
 class FfmpegModuleInstaller {
+  FfmpegModuleInstaller({
+    this.download,
+    this.taskbarProgress,
+  });
+
+  final FfmpegModuleDownload? download;
+  final TaskbarProgress? taskbarProgress;
   Process? _process;
   bool _cancelled = false;
+
   void cancel() {
     _cancelled = true;
     _process?.kill();
@@ -73,29 +89,32 @@ class FfmpegModuleInstaller {
     if (_cancelled) throw const FfmpegUnavailable();
   }
 
-  Future<void> install(
-      {required void Function(double?) progress,
-      void Function(String)? onStage,
-      FfmpegRuntime? runtime}) async {
+  Future<void> install({
+    required void Function(double?) progress,
+    void Function(String)? onStage,
+    FfmpegRuntime? runtime,
+  }) async {
     _check();
-    final taskbar = TaskbarProgress.instance.begin();
+    final taskbar = (taskbarProgress ?? TaskbarProgress.instance).begin();
     try {
       await _install(
-          progress: (value) {
-            taskbar.update(value);
-            progress(value);
-          },
-          onStage: onStage,
-          runtime: runtime);
+        progress: (value) {
+          taskbar.update(value);
+          progress(value);
+        },
+        onStage: onStage,
+        runtime: runtime,
+      );
     } finally {
       taskbar.dispose();
     }
   }
 
-  Future<void> _install(
-      {required void Function(double?) progress,
-      void Function(String)? onStage,
-      FfmpegRuntime? runtime}) async {
+  Future<void> _install({
+    required void Function(double?) progress,
+    void Function(String)? onStage,
+    FfmpegRuntime? runtime,
+  }) async {
     final tools = runtime ?? FfmpegRuntime.shared;
     final proxy = AppSettings.instance.networkProxy.value;
     final proxyUrl = proxy.mode == NetworkProxyMode.custom
@@ -106,81 +125,111 @@ class FfmpegModuleInstaller {
       throw const FormatException('Invalid custom HTTP proxy');
     }
     final target = await tools.installDirectory;
+    if (!await isFfmpegDirectoryPathSafe(target.path, allowMissing: true)) {
+      throw const FileSystemException('Unsafe FFmpeg installation directory');
+    }
     await target.parent.create(recursive: true);
+    if (!await isFfmpegDirectoryPathSafe(target.parent.path)) {
+      throw const FileSystemException('Unsafe FFmpeg installation directory');
+    }
     final work = await target.parent.createTemp('.ffmpeg-download-');
     Directory? old;
     var published = false;
     try {
       _check();
-      final script = File(p.join(work.path, 'download.ps1'));
-      await script.writeAsString(_downloadScript);
       final zip = File(p.join(work.path, 'module.zip'));
-      final shell = p.join(Platform.environment['SystemRoot'] ?? r'C:\Windows',
-          'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-      _process = await Process.start(
-          shell,
-          [
-            '-NoProfile',
-            '-NonInteractive',
-            '-WindowStyle',
-            'Hidden',
-            '-ExecutionPolicy',
-            'Bypass',
-            '-File',
-            script.path,
-            '-Url',
-            ffmpegModuleUrl,
-            '-Destination',
-            zip.path,
-            '-ProxyMode',
-            proxy.mode.name,
-            '-ProxyUrl',
-            proxyUrl ?? '',
-            '-UserAgent',
-            'DanPlayer/${AppSettings.version}'
-          ],
-          runInShell: false);
-      await _process!.stdin.close();
-      _check();
-      final output = _process!.stdout
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())
-          .listen((line) {
-        final bytes = int.tryParse(line);
-        if (bytes != null) progress((bytes / ffmpegModuleBytes).clamp(0, 1));
-      }).asFuture<void>();
-      final errors = _process!.stderr.drain<void>();
-      final timer = Timer(const Duration(minutes: 15), () => _process?.kill());
-      try {
-        final exit = await _process!.exitCode;
-        onStage?.call('download process ended');
-        await Future.wait([output, errors]);
+      onStage?.call('downloading archive');
+      if (download != null) {
+        await download!(zip, (value) {
+          if (!_cancelled) progress(value);
+        }, () => !_cancelled);
+      } else {
+        final script = File(p.join(work.path, 'download.ps1'));
+        await script.writeAsString(_downloadScript);
+        final shell = p.join(
+            Platform.environment['SystemRoot'] ?? r'C:\Windows',
+            'System32',
+            'WindowsPowerShell',
+            'v1.0',
+            'powershell.exe');
+        _process = await Process.start(
+            shell,
+            [
+              '-NoProfile',
+              '-NonInteractive',
+              '-WindowStyle',
+              'Hidden',
+              '-ExecutionPolicy',
+              'Bypass',
+              '-File',
+              script.path,
+              '-Url',
+              ffmpegModuleUrl,
+              '-Destination',
+              zip.path,
+              '-ProxyMode',
+              proxy.mode.name,
+              '-ProxyUrl',
+              proxyUrl ?? '',
+              '-UserAgent',
+              'DanPlayer/${AppSettings.version}',
+              '-ExpectedBytes',
+              '$ffmpegModuleBytes',
+            ],
+            runInShell: false);
+        await _process!.stdin.close();
         _check();
-        if (exit != 0) throw const FfmpegUnavailable();
-      } finally {
-        timer.cancel();
-        _process = null;
+        final output = _process!.stdout
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .listen((line) {
+          final bytes = int.tryParse(line);
+          if (bytes != null) progress((bytes / ffmpegModuleBytes).clamp(0, 1));
+        }).asFuture<void>();
+        final errors = _process!.stderr.drain<void>();
+        final timer =
+            Timer(const Duration(minutes: 15), () => _process?.kill());
+        try {
+          final exit = await _process!.exitCode;
+          onStage?.call('download process ended');
+          await Future.wait([output, errors]);
+          _check();
+          if (exit != 0) throw const FfmpegUnavailable();
+        } finally {
+          timer.cancel();
+          _process = null;
+        }
       }
+      _check();
       progress(null);
       onStage?.call('verifying archive');
       final unpacked = Directory(p.join(work.path, 'unpacked'));
       await _extractInWorker(zip.path, unpacked.path);
       onStage?.call('archive extracted');
       _check();
-      if (!await tools.validateDirectory(unpacked.path))
+      if (!await tools.validateDirectory(unpacked.path)) {
         throw const FfmpegUnavailable();
+      }
       _check();
-      if (await target.exists())
+      if (await target.exists()) {
         old = await target.rename(p.join(work.path, 'previous'));
+      }
       await unpacked.rename(target.path);
       published = true;
+      onStage?.call('re-verifying installed tool');
       tools.invalidate();
-      if (!await tools.ensure(directories: [target.path]))
+      if (!await tools.ensure(force: true, directories: [target.path])) {
         throw const FfmpegUnavailable();
+      }
+      LOGGER.i('[ffmpeg] Installed and verified FFmpeg module in ${target.path}');
       old = null;
+      progress(1);
     } catch (_) {
-      if (published && await target.exists())
+      if (published &&
+          await target.exists() &&
+          !await FileSystemEntity.isLink(target.path)) {
         await target.delete(recursive: true);
+      }
       if (old != null && await old.exists()) await old.rename(target.path);
       tools.invalidate();
       rethrow;
@@ -198,10 +247,12 @@ class FfmpegModuleInstaller {
 Future<void> _extractInWorker(String zipPath, String destination) =>
     Isolate.run(() => extractFfmpegModule(zipPath, destination));
 
-/// Decode only a fixed, authenticated archive, in a worker isolate.
+/// Decode only the pinned v26.1.2-snapshot.8 slim audio FFmpeg archive.
 Future<void> extractFfmpegModule(String zipPath, String destination) async {
   final file = File(zipPath);
-  if (await file.length() != ffmpegModuleBytes ||
+  if (await FileSystemEntity.type(zipPath, followLinks: false) !=
+          FileSystemEntityType.file ||
+      await file.length() != ffmpegModuleBytes ||
       (await sha256.bind(file.openRead()).first).toString() !=
           ffmpegModuleHash) {
     throw const FormatException('Module checksum mismatch');
@@ -218,7 +269,6 @@ Future<void> extractFfmpegModule(String zipPath, String destination) async {
       'avfilter-10.dll',
       'avformat-61.dll',
       'avutil-59.dll',
-      'postproc-58.dll',
       'swresample-5.dll',
       'swscale-8.dll',
       'LICENSE',
@@ -229,14 +279,16 @@ Future<void> extractFfmpegModule(String zipPath, String destination) async {
     for (final entry in archive) {
       total += entry.size;
       if (!entry.isFile ||
+          entry.isSymbolicLink ||
           !names.contains(entry.name) ||
           !seen.add(entry.name) ||
-          total > 256 * 1024 * 1024) {
+          total > 64 * 1024 * 1024) {
         throw const FormatException('Invalid module layout');
       }
     }
-    if (seen.length != names.length)
+    if (seen.length != names.length) {
       throw const FormatException('Incomplete module');
+    }
     await Directory(destination).create(recursive: true);
     for (final entry in archive) {
       final stream = OutputFileStream(p.join(destination, entry.name));

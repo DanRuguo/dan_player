@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'package:dan_player/component/app_motion.dart';
 import 'package:dan_player/component/app_shape.dart';
 import 'package:dan_player/component/app_dialog_title.dart';
 import 'package:dan_player/component/app_dialog_content.dart';
@@ -516,13 +517,11 @@ class _PreciseSeekDialogState extends State<PreciseSeekDialog> {
   Widget build(BuildContext context) {
     String preview = '';
     try {
-      preview = Duration(
-              milliseconds: (SeekTarget.parse(_input.text).resolve(
-                          widget.service.position, widget.service.length) *
-                      1000)
-                  .round())
-          .toString();
+      final resolved = SeekTarget.parse(_input.text)
+          .resolve(widget.service.position, widget.service.length);
+      preview = SeekTarget.formatSeconds(resolved);
     } catch (_) {}
+    final scheme = Theme.of(context).colorScheme;
     return AlertDialog(
         title: AppDialogTitle(ui('精确定位')),
         content: SizedBox(
@@ -542,8 +541,24 @@ class _PreciseSeekDialogState extends State<PreciseSeekDialog> {
                           onSubmitted: (_) => _submit()),
                       const SizedBox(height: 12),
                       Text(ui('相对跳转以确认时的当前位置计算，暂停状态保持不变。')),
-                      if (preview.isNotEmpty)
-                        Text(preview, textAlign: TextAlign.center),
+                      if (preview.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          preview,
+                          key: const ValueKey('precise-seek-preview'),
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(
+                                color: scheme.primary,
+                                fontWeight: FontWeight.w600,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                        ),
+                      ],
                       if (_error != null)
                         Text(_error!,
                             style: TextStyle(
@@ -577,17 +592,30 @@ class _BookmarkCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: selected ? scheme.secondaryContainer : scheme.surfaceContainerLow,
-      shape: RoundedRectangleBorder(
-          borderRadius: AppShape.controlRadius,
-          side: BorderSide(
-              color: selected
-                  ? scheme.primary
-                  : scheme.outlineVariant.withValues(alpha: .5),
-              width: selected ? 2 : 1)),
+    final motionDuration = AppMotion.duration(
+      context,
+      MotionKind.feedback,
+      AppMotion.quick,
+    );
+    return AnimatedContainer(
+      duration: motionDuration,
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        color:
+            selected ? scheme.secondaryContainer : scheme.surfaceContainerLow,
+        borderRadius: AppShape.controlRadius,
+        border: Border.all(
+          color: selected
+              ? scheme.primary
+              : scheme.outlineVariant.withValues(alpha: .5),
+          width: selected ? 2 : 1,
+        ),
+      ),
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          borderRadius: AppShape.controlRadius,
           onTap: onTap,
           child: Padding(
               padding: const EdgeInsets.all(12),
@@ -597,7 +625,12 @@ class _BookmarkCard extends StatelessWidget {
                     SizedBox(
                         height: MediaQuery.textScalerOf(context).scale(24) * 2,
                         child: Row(children: [
-                          Icon(Icons.bookmark_outline, color: scheme.primary),
+                          Icon(
+                            selected
+                                ? Icons.bookmark
+                                : Icons.bookmark_outline,
+                            color: scheme.primary,
+                          ),
                           const SizedBox(width: 8),
                           Expanded(
                               child: Text(title,
@@ -615,12 +648,17 @@ class _BookmarkCard extends StatelessWidget {
                         key: ValueKey(('bookmark-time', time)),
                         maxLines: 1,
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.primary)),
+                            color: Theme.of(context).colorScheme.primary,
+                            fontFeatures: const [
+                              FontFeature.tabularFigures(),
+                            ])),
                     const Spacer(),
                     Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: actions),
-                  ]))),
+                  ])),
+        ),
+      ),
     );
   }
 }

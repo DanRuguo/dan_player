@@ -159,8 +159,12 @@ String? _attributeNamespace(XmlAttribute attribute) {
 }
 
 String? _role(XmlElement element) {
-  final roles =
-      _attribute(element, 'role', _metadataNamespaces)?.split(RegExp(r'\s+'));
+  final roles = _attribute(element, 'role', _metadataNamespaces)
+      ?.trim()
+      .split(RegExp(r'\s+'))
+      .where((token) => token.isNotEmpty)
+      .map((token) => token.toLowerCase())
+      .toList(growable: false);
   if (roles?.contains('x-translation') == true) return 'translation';
   if (roles?.any((role) =>
           role == 'x-roman' ||
@@ -170,7 +174,8 @@ String? _role(XmlElement element) {
     return 'romanization';
   }
   final ruby =
-      _attribute(element, 'ruby', {'http://www.w3.org/ns/ttml#styling', null});
+      _attribute(element, 'ruby', {'http://www.w3.org/ns/ttml#styling', null})
+          ?.trim();
   if (ruby == 'text' || ruby == 'textContainer') return 'romanization';
   if (roles?.contains('x-bg') == true) return 'background';
   return null;
@@ -289,6 +294,14 @@ class _TtmlReader {
               element.getAttribute('timeContainer') != 'par')) {
         throw const FormatException('TTML 时间格式或时制不受支持');
       }
+      final timing = _attribute(element, 'timing', _appleNamespaces)?.trim();
+      if (timing != null &&
+          timing.isNotEmpty &&
+          timing.toLowerCase() != 'word' &&
+          timing.toLowerCase() != 'line' &&
+          timing.toLowerCase() != 'none') {
+        throw const FormatException('TTML 时间格式或时制不受支持');
+      }
       for (final name in ['begin', 'end', 'dur']) {
         final value = element.getAttribute(name);
         if (value != null) _time(value);
@@ -330,7 +343,7 @@ class _TtmlReader {
     if (value.length > 64) throw const FormatException('歌词时间超出范围');
     if (value.startsWith('-')) throw const FormatException('时间不能为负数');
     final clock =
-        RegExp(r'^(?:(\d+):)?(\d{2}):(\d{2})(?:\.(\d+))?$').firstMatch(value);
+        RegExp(r'^(?:(\d+):)?(\d{1,2}):(\d{2})(?:\.(\d+))?$').firstMatch(value);
     if (clock != null) {
       final hours = BigInt.parse(clock[1] ?? '0');
       final minutes = int.parse(clock[2]!);

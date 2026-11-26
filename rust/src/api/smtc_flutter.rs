@@ -194,6 +194,9 @@ impl SMTCFlutter {
 
         let _smtc = _player.SystemMediaTransportControls()?;
         Self::_init_controls(&_smtc)?;
+        // Keep the Windows 11 media flyout hidden until a real track or
+        // restored session publishes metadata or starts playing.
+        let _ = _smtc.SetIsEnabled(false);
 
         Ok(Self {
             _smtc,

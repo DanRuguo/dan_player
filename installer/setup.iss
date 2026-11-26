@@ -55,13 +55,13 @@ WizardStyle=modern dynamic windows11 hidebevels
 #endif
 #endif
 #ifdef QaThemeDark
-WizardBackColor=#202020
+WizardBackColor=#14161d
 #else
-WizardBackColor=#f3f3f3
+WizardBackColor=#f6f7fc
 #endif
-WizardBackColorDynamicDark=#202020
+WizardBackColorDynamicDark=#14161d
 ; Let Inno size its own notebook/footer together. No manual upward footer move.
-WizardSizePercent=110,100
+WizardSizePercent=112,106
 WizardImageFile=
 WizardSmallImageFile=
 WizardImageBackColor=none
@@ -191,6 +191,8 @@ function DP_DeleteOriginalInstaller(): Integer;
   external 'DP_DeleteOriginalInstaller@files:dan_installer_native.dll stdcall';
 function DP_LoadPrivateFont(Path, Buffer: String; Capacity: Integer): Integer;
   external 'DP_LoadPrivateFont@files:dan_installer_native.dll stdcall';
+procedure DP_ConfigureBrandTheme(Accent: LongWord; Subtitle: String);
+  external 'DP_ConfigureBrandTheme@files:dan_installer_native.dll stdcall';
 function DP_ShowBrand(Parent: HWND; Width, Height: Integer; Background: LongWord;
   IconPath: String; Callback: NativeInt): Integer;
   external 'DP_ShowBrand@files:dan_installer_native.dll stdcall';
@@ -204,8 +206,14 @@ procedure DP_ProgressClose();
   external 'DP_ProgressClose@files:dan_installer_native.dll stdcall';
 function DP_AccentColor(): LongWord;
   external 'DP_AccentColor@files:dan_installer_native.dll stdcall';
+procedure DP_ApplyWindowChrome(Window: HWND; Surface, Accent: LongWord; Dark: Boolean);
+  external 'DP_ApplyWindowChrome@files:dan_installer_native.dll stdcall';
 function DP_StyleButton(Window: HWND; Surface, Accent: LongWord; Primary: Boolean; Radius: Integer): Integer;
   external 'DP_StyleButton@files:dan_installer_native.dll stdcall';
+function DP_StyleCheckCard(Window: HWND; Surface, Accent: LongWord; Radius: Integer): Integer;
+  external 'DP_StyleCheckCard@files:dan_installer_native.dll stdcall';
+function DP_StyleInfoCard(Window: HWND; Surface, Accent: LongWord; Radius, PadX, PadY: Integer; Centered: Boolean): Integer;
+  external 'DP_StyleInfoCard@files:dan_installer_native.dll stdcall';
 procedure DP_CloseControls();
   external 'DP_CloseControls@files:dan_installer_native.dll stdcall';
 function PostMessage(Window: HWND; Message: UINT; WParam: WPARAM; LParam: LPARAM): Boolean;
@@ -678,7 +686,7 @@ begin
   DesktopCheck := TNewCheckBox.Create(WizardForm);
   DesktopCheck.Parent := WizardForm.SelectDirPage;
   DesktopCheck.SetBounds(ScaleX(0), ParentButton.Top + ParentButton.Height + ScaleY(12),
-    WizardForm.SelectDirPage.Width, ScaleY(28));
+    WizardForm.SelectDirPage.Width, ScaleY(34));
   DesktopCheck.Caption := '创建桌面快捷方式';
   DesktopCheck.Checked := True;
 #ifdef QaBuild
@@ -687,7 +695,7 @@ begin
   StartCheck := TNewCheckBox.Create(WizardForm);
   StartCheck.Parent := WizardForm.SelectDirPage;
   StartCheck.SetBounds(ScaleX(0), DesktopCheck.Top + DesktopCheck.Height + ScaleY(6),
-    WizardForm.SelectDirPage.Width, ScaleY(28));
+    WizardForm.SelectDirPage.Width, ScaleY(34));
   StartCheck.Caption := '创建开始菜单快捷方式';
   StartCheck.Checked := True;
 #ifdef QaBuild
@@ -695,20 +703,19 @@ begin
 #endif
   DataNote := TNewStaticText.Create(WizardForm);
   DataNote.Parent := WizardForm.SelectDirPage;
-  DataNote.SetBounds(ScaleX(0), StartCheck.Top + StartCheck.Height + ScaleY(8),
-    WizardForm.SelectDirPage.Width, ScaleY(66));
+  DataNote.SetBounds(ScaleX(0), StartCheck.Top + StartCheck.Height + ScaleY(10),
+    WizardForm.SelectDirPage.Width, ScaleY(58));
   DataNote.AutoSize := False;
   DataNote.WordWrap := True;
   DataNote.Caption := '安装到当前用户可写目录，无需管理员权限。' + #13#10 +
     '升级保留用户数据；如安装失败，备份保存在安装目录旁。';
-  DataNote.AdjustHeight;
-  WizardForm.ProgressGauge.Height := ScaleY(8);
+  WizardForm.ProgressGauge.Height := ScaleY(12);
   WizardForm.StatusLabel.Font.Style := WizardForm.StatusLabel.Font.Style + [fsBold];
   InstallNote := TNewStaticText.Create(WizardForm);
   InstallNote.Parent := WizardForm.InstallingPage;
   InstallNote.SetBounds(WizardForm.ProgressGauge.Left,
-    WizardForm.ProgressGauge.Top + WizardForm.ProgressGauge.Height + ScaleY(54),
-    WizardForm.ProgressGauge.Width, ScaleY(48));
+    WizardForm.ProgressGauge.Top + WizardForm.ProgressGauge.Height + ScaleY(48),
+    WizardForm.ProgressGauge.Width, ScaleY(58));
   InstallNote.AutoSize := False;
   InstallNote.WordWrap := True;
   InstallNote.Alignment := taCenter;
@@ -739,8 +746,10 @@ end;
 procedure CurPageChanged(CurPageID: Integer);
 var Background, Accent: LongWord;
 begin
-  if IsDarkInstallMode then Background := $00202020 else Background := $00F3F3F3;
+  if IsDarkInstallMode then Background := $001D1614 else Background := $00FCF7F6;
   Accent := DP_AccentColor();
+  DP_ApplyWindowChrome(WizardForm.Handle, Background, Accent, IsDarkInstallMode);
+  DP_ConfigureBrandTheme(Accent, '{#DisplayVersion}');
   WizardForm.PageNameLabel.Alignment := taCenter;
   WizardForm.PageDescriptionLabel.Alignment := taCenter;
   WizardForm.FinishedHeadingLabel.Alignment := taCenter;
@@ -753,12 +762,17 @@ begin
   ParentButton.Font.Style := ParentButton.Font.Style + [fsBold];
   OpenButton.Font.Style := OpenButton.Font.Style + [fsBold];
   DeleteButton.Font.Style := DeleteButton.Font.Style + [fsBold];
-  DP_StyleButton(WizardForm.NextButton.Handle, Background, Accent, True, ScaleX(6));
-  DP_StyleButton(WizardForm.BackButton.Handle, Background, Accent, False, ScaleX(6));
-  DP_StyleButton(WizardForm.CancelButton.Handle, Background, Accent, False, ScaleX(6));
-  DP_StyleButton(ParentButton.Handle, Background, Accent, False, ScaleX(6));
-  DP_StyleButton(OpenButton.Handle, Background, Accent, True, ScaleX(6));
-  DP_StyleButton(DeleteButton.Handle, Background, Accent, False, ScaleX(6));
+  DP_StyleButton(WizardForm.NextButton.Handle, Background, Accent, True, ScaleX(48));
+  DP_StyleButton(WizardForm.BackButton.Handle, Background, Accent, False, ScaleX(48));
+  DP_StyleButton(WizardForm.CancelButton.Handle, Background, Accent, False, ScaleX(48));
+  DP_StyleButton(ParentButton.Handle, Background, Accent, False, ScaleX(48));
+  DP_StyleButton(OpenButton.Handle, Background, Accent, True, ScaleX(48));
+  DP_StyleButton(DeleteButton.Handle, Background, Accent, False, ScaleX(48));
+  DP_StyleCheckCard(DesktopCheck.Handle, Background, Accent, ScaleX(12));
+  DP_StyleCheckCard(StartCheck.Handle, Background, Accent, ScaleX(12));
+  DP_StyleInfoCard(DataNote.Handle, Background, Accent, ScaleX(14), ScaleX(14), ScaleY(8), False);
+  DP_StyleInfoCard(InstallNote.Handle, Background, Accent, ScaleX(14), ScaleX(14), ScaleY(8), True);
+  DP_StyleInfoCard(UpdateNote.Handle, Background, Accent, ScaleX(16), ScaleX(18), ScaleY(12), True);
 #ifdef QaBuild
   if (CurPageID = wpSelectDir) and (ExpandConstant('{param:QAAUTOINSTALL|0}') = '1') then
     PostMessage(WizardForm.NextButton.Handle, $00F5, 0, 0);

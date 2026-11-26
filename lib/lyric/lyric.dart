@@ -14,12 +14,28 @@ abstract class LyricLine {
   String? japaneseReading;
   List<JapaneseLyricReadingSpan> japaneseReadingSpans = const [];
 
+  /// Display-only offline English IPA phonetics. Source/cache serialization omits it.
+  String? englishPhonetic;
+  List<EnglishLyricPhoneticSpan> englishPhoneticSpans = const [];
+
   LyricLine(this.start);
 }
 
 /// A derived reading above a complete source-text range (UTF-16, half open).
 class JapaneseLyricReadingSpan implements LyricRubySpan {
   const JapaneseLyricReadingSpan(
+      {required this.start, required this.end, required this.text});
+  @override
+  final int start;
+  @override
+  final int end;
+  @override
+  final String text;
+}
+
+/// A derived English IPA phonetic span above one source word (UTF-16, half open).
+class EnglishLyricPhoneticSpan implements LyricPhoneticSpan {
+  const EnglishLyricPhoneticSpan(
       {required this.start, required this.end, required this.text});
   @override
   final int start;

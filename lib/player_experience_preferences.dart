@@ -27,6 +27,7 @@ class PlayerExperiencePreferences {
     this.windowAspectRatio = 0,
     this.roundedWindowCorners = true,
     this.preventSleepDuringPlayback = false,
+    this.touchSound = true,
   });
 
   final bool closeToTray;
@@ -49,6 +50,7 @@ class PlayerExperiencePreferences {
   final bool windowAspectRatioLocked;
   final bool roundedWindowCorners;
   final bool preventSleepDuringPlayback;
+  final bool touchSound;
 
   /// The normal-window client ratio captured when ratio locking is enabled.
   /// Zero means that the next live application should capture the current
@@ -114,6 +116,7 @@ class PlayerExperiencePreferences {
     double? windowAspectRatio,
     bool? roundedWindowCorners,
     bool? preventSleepDuringPlayback,
+    bool? touchSound,
   }) {
     var nextWindowSizeLocked = windowSizeLocked ?? this.windowSizeLocked;
     var nextWindowAspectRatioLocked =
@@ -151,6 +154,7 @@ class PlayerExperiencePreferences {
       roundedWindowCorners: roundedWindowCorners ?? this.roundedWindowCorners,
       preventSleepDuringPlayback:
           preventSleepDuringPlayback ?? this.preventSleepDuringPlayback,
+      touchSound: touchSound ?? this.touchSound,
       windowAspectRatio: safeWindowAspectRatio(
         windowAspectRatio,
         fallback: this.windowAspectRatio,
@@ -179,6 +183,7 @@ class PlayerExperiencePreferences {
         'windowAspectRatioLocked': windowAspectRatioLocked && !windowSizeLocked,
         'roundedWindowCorners': roundedWindowCorners,
         'preventSleepDuringPlayback': preventSleepDuringPlayback,
+        'touchSound': touchSound,
         'windowAspectRatio': safeWindowAspectRatio(windowAspectRatio),
       };
 
@@ -215,6 +220,7 @@ class PlayerExperiencePreferences {
       roundedWindowCorners:
           flag('roundedWindowCorners', defaults.roundedWindowCorners),
       preventSleepDuringPlayback: flag('preventSleepDuringPlayback', false),
+      touchSound: flag('touchSound', defaults.touchSound),
       windowAspectRatio: safeWindowAspectRatio(value['windowAspectRatio']),
     );
   }
@@ -240,27 +246,30 @@ class PlayerExperiencePreferences {
       windowAspectRatioLocked == other.windowAspectRatioLocked &&
       roundedWindowCorners == other.roundedWindowCorners &&
       preventSleepDuringPlayback == other.preventSleepDuringPlayback &&
+      touchSound == other.touchSound &&
       windowAspectRatio == other.windowAspectRatio;
 
   @override
-  int get hashCode => Object.hash(
-      closeToTray,
-      taskbarControls,
-      taskbarLyrics,
-      taskbarAppearance,
-      taskbarSongPreview,
-      taskbarPlaybackProgress,
-      trayMenuBlurRadius,
-      springLyrics,
-      desktopLyricVertical,
-      playbackRate,
-      playbackPitch,
-      exclusiveOutput,
-      sidebarWidth,
-      sidebarLocked,
-      windowSizeLocked,
-      windowAspectRatioLocked,
-      roundedWindowCorners,
-      preventSleepDuringPlayback,
-      windowAspectRatio);
+  int get hashCode => Object.hashAll([
+        closeToTray,
+        taskbarControls,
+        taskbarLyrics,
+        taskbarAppearance,
+        taskbarSongPreview,
+        taskbarPlaybackProgress,
+        trayMenuBlurRadius,
+        springLyrics,
+        desktopLyricVertical,
+        playbackRate,
+        playbackPitch,
+        exclusiveOutput,
+        sidebarWidth,
+        sidebarLocked,
+        windowSizeLocked,
+        windowAspectRatioLocked,
+        roundedWindowCorners,
+        preventSleepDuringPlayback,
+        touchSound,
+        windowAspectRatio,
+      ]);
 }

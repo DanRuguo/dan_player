@@ -1,6 +1,11 @@
 import 'catalog_snapshot1_2612.dart';
 import 'catalog_snapshot2_2612.dart';
 import 'catalog_snapshot3_2612.dart';
+import 'catalog_snapshot4_2612.dart';
+import 'catalog_snapshot5_2612.dart';
+import 'catalog_snapshot6_2612.dart';
+import 'catalog_snapshot7_2612.dart';
+import 'catalog_snapshot8_2612.dart';
 import 'catalog_statistics_trends.dart';
 import 'catalog_stats_guide_2610.dart';
 import 'catalog_lyric_playback_tools.dart';
@@ -98,6 +103,11 @@ final Map<String, List<String>> uiCatalog = Map.unmodifiable({
   ...catalogSnapshot12612,
   ...catalogSnapshot22612,
   ...catalogSnapshot32612,
+  ...catalogSnapshot42612,
+  ...catalogSnapshot52612,
+  ...catalogSnapshot62612,
+  ...catalogSnapshot72612,
+  ...catalogSnapshot82612,
   ...catalogLyricPlaybackTools,
   ...catalogOnboardingGuidePrompt,
   ...catalogStatisticsTrends,

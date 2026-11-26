@@ -18,6 +18,13 @@ class SearchHistoryStore extends ValueNotifier<List<String>> {
   final Future<File> Function() _resolveFile;
   ProtectedJsonStore? _store;
   bool _loaded = false;
+  int _pendingClears = 0;
+  List<String> _persisted = const [];
+
+  void _publish(List<String> queries) {
+    _persisted = List.unmodifiable(queries);
+    if (_pendingClears == 0) value = _persisted;
+  }
   Future<void> _pending = Future.value();
 
   Future<void> _serial(Future<void> Function() action) {
@@ -44,10 +51,11 @@ class SearchHistoryStore extends ValueNotifier<List<String>> {
     final store = _store ??= ProtectedJsonStore(await _resolveFile(),
         validate: _validate, maxBytes: 512 * 1024);
     final data = await store.snapshot();
-    value = List.unmodifiable((data['queries'] as List? ?? const [])
+    final queries = (data['queries'] as List? ?? const [])
         .cast<String>()
         .map((q) => q.trim())
-        .toSet());
+        .toSet();
+    _publish(queries.toList());
     _loaded = true;
   }
 
@@ -55,7 +63,7 @@ class SearchHistoryStore extends ValueNotifier<List<String>> {
 
   Future<void> _save(List<String> queries) async {
     await _store!.update((data) => data['queries'] = queries);
-    value = List.unmodifiable(queries);
+    _publish(queries);
   }
 
   Future<void> record(String query,
@@ -64,8 +72,8 @@ class SearchHistoryStore extends ValueNotifier<List<String>> {
         final text = query.trim();
         if (text.isEmpty) return;
         await _load();
-        if (value.isNotEmpty && value.first == text) return;
-        final next = [text, ...value.where((entry) => entry != text)]
+        if (_persisted.isNotEmpty && _persisted.first == text) return;
+        final next = [text, ..._persisted.where((entry) => entry != text)]
             .take(maxEntries)
             .toList();
         // The canonical presentation budget also bounds long, full-row terms.
@@ -75,7 +83,22 @@ class SearchHistoryStore extends ValueNotifier<List<String>> {
 
   Future<void> remove(String query) => _serial(() async {
         await _load();
-        if (!value.contains(query)) return;
-        await _save(value.where((q) => q != query).toList());
+        if (!_persisted.contains(query)) return;
+        await _save(_persisted.where((q) => q != query).toList());
       });
+
+  /// Clears all saved queries with optimistic UI feedback and rollback on
+  /// persistence failure when no newer search mutation has superseded it.
+  Future<void> clear() {
+    _pendingClears++;
+    value = const [];
+    return _serial(() async {
+      try {
+        await _load();
+        await _save(const []);
+      } finally {
+        if (--_pendingClears == 0) value = _persisted;
+      }
+    });
+  }
 }

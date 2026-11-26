@@ -62,7 +62,7 @@ class MiniNowPlaying extends StatelessWidget {
               height: NowPlayingBarMetrics.height(context),
               width: width,
               child: FrostedSurface(
-                borderRadius: AppShape.surfaceRadius,
+                borderRadius: AppShape.cardRadius,
                 blur: 22.0,
                 child: LayoutBuilder(builder: (context, constraints) {
                   final playback = PlayService.instance.playbackService;
@@ -163,7 +163,7 @@ class _NowPlayingForegroundState extends State<_NowPlayingForeground> {
   Widget build(BuildContext context) {
     UiLanguageScope.watch(context);
     final scheme = Theme.of(context).colorScheme;
-    const borderRadius = AppShape.surfaceRadius;
+    const borderRadius = AppShape.cardRadius;
 
     final playbackService = PlayService.instance.playbackService;
     return ListenableBuilder(
@@ -312,17 +312,17 @@ class _QueueDialogTitle extends StatelessWidget {
           height: 40,
           decoration: BoxDecoration(
             color: scheme.primaryContainer.withValues(alpha: .82),
-            borderRadius: AppShape.controlRadius,
+            borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(Symbols.queue_music,
               size: 22, color: scheme.onPrimaryContainer),
         ),
         trailing: Container(
-          constraints: const BoxConstraints(minWidth: 36, minHeight: 32),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          constraints: const BoxConstraints(minWidth: 38, minHeight: 30),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
-            color: scheme.secondaryContainer.withValues(alpha: .72),
-            borderRadius: AppShape.controlRadius,
+            color: scheme.secondaryContainer.withValues(alpha: .76),
+            borderRadius: AppShape.pillRadius,
           ),
           alignment: Alignment.center,
           child: Text(
@@ -380,12 +380,12 @@ class _NowPlayingCover extends StatelessWidget {
       return AnimatedSwitcher(
         duration:
             AppMotion.duration(context, MotionKind.theme, AppMotion.standard),
-        child: _CoverPlaceholder(key: ValueKey("idle-cover")),
+        child: const _CoverPlaceholder(key: ValueKey("idle-cover")),
       );
     }
 
     return ClipRRect(
-      borderRadius: AppShape.smallRadius,
+      borderRadius: BorderRadius.circular(12),
       child: AudioArtwork(
         audio: nowPlaying!,
         size: 52,
@@ -406,9 +406,9 @@ class _CoverPlaceholder extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return _CoverFrame(
       child: Icon(
-        Symbols.broken_image,
-        size: 28.0,
-        color: scheme.onSurfaceVariant,
+        Symbols.music_note,
+        size: 24.0,
+        color: scheme.primary,
       ),
     );
   }
@@ -444,10 +444,10 @@ class _CoverFrame extends StatelessWidget {
       height: 52.0,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerHighest.withValues(alpha: 0.42),
-          borderRadius: AppShape.smallRadius,
+          color: scheme.primaryContainer.withValues(alpha: 0.42),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: scheme.outlineVariant.withValues(alpha: 0.42),
+            color: scheme.primary.withValues(alpha: 0.16),
           ),
         ),
         child: Center(child: child),

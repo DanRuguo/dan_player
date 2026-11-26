@@ -65,17 +65,33 @@ Lyric? parseOnlineLyricPayload(Object? payload) {
   }
   final selected =
       candidates.where(hasWordTiming).firstOrNull ?? candidates.firstOrNull;
+  if (selected != null && translation != null) {
+    alignLyricAuxiliaryLines(
+      selected.lines,
+      translation,
+      readExisting: (row) => switch (row) {
+        SyncLyricLine() => row.translation,
+        UnsyncLyricLine() =>
+          row.content.contains('┃') ? row.content.split('┃').skip(1).join('┃') : null,
+        _ => null,
+      },
+      assign: (row, value) {
+        if (row is SyncLyricLine) {
+          row.translation = value;
+        } else if (row is UnsyncLyricLine && !row.content.contains('┃')) {
+          row.content = '${row.content}┃$value';
+        }
+      },
+    );
+  }
   final roman = _section(payload['yromalrc']) ?? _section(payload['romalrc']);
   if (selected != null && roman != null) {
-    final byTime = <Duration, String>{};
-    for (final text in const LineSplitter().convert(roman)) {
-      for (final row in LrcLine.fromLineAll(text)) {
-        if (row.content.trim().isNotEmpty) byTime[row.start] = row.content;
-      }
-    }
-    for (final row in selected.lines) {
-      row.romanization = byTime[row.start];
-    }
+    alignLyricAuxiliaryLines(
+      selected.lines,
+      roman,
+      readExisting: (row) => row.romanization,
+      assign: (row, value) => row.romanization = value,
+    );
   }
   return selected;
 }
@@ -87,7 +103,14 @@ Lyric? _parse(String type, String text, String? translation) {
       case 'qrc':
         result = Qrc.fromQrcText(text, translation);
       case 'krc':
-        result = Krc.fromKrcText(text);
+        final krc = Krc.fromKrcText(text);
+        alignLyricAuxiliaryLines(
+          krc.lines,
+          translation,
+          readExisting: (row) => (row as SyncLyricLine).translation,
+          assign: (row, value) => (row as SyncLyricLine).translation = value,
+        );
+        result = krc;
       case 'yrc':
         result = _yrc(text, translation);
       default:
@@ -111,12 +134,6 @@ Qrc _yrc(String text, String? translation) {
   final header = RegExp(r'^\[(\d+),(\d+)\]');
   final word = RegExp(r'\((\d+),(\d+),\d+\)');
   final lines = <QrcLine>[];
-  final translated = <Duration, String>{};
-  for (final raw in const LineSplitter().convert(translation ?? '')) {
-    for (final line in LrcLine.fromLineAll(raw)) {
-      translated[line.start] = line.content;
-    }
-  }
   for (final line in const LineSplitter().convert(text)) {
     final match = header.firstMatch(line);
     if (match == null) continue;
@@ -124,18 +141,24 @@ Qrc _yrc(String text, String? translation) {
     if (words.isEmpty) continue;
     final start = Duration(milliseconds: int.parse(match[1]!));
     lines.add(QrcLine(
-        start,
-        Duration(milliseconds: int.parse(match[2]!)),
-        [
-          for (var i = 0; i < words.length; i++)
-            QrcWord(
-                Duration(milliseconds: int.parse(words[i][1]!)),
-                Duration(milliseconds: int.parse(words[i][2]!)),
-                line.substring(words[i].end,
-                    i + 1 < words.length ? words[i + 1].start : line.length)),
-        ],
-        translated[start]));
+      start,
+      Duration(milliseconds: int.parse(match[2]!)),
+      [
+        for (var i = 0; i < words.length; i++)
+          QrcWord(
+              Duration(milliseconds: int.parse(words[i][1]!)),
+              Duration(milliseconds: int.parse(words[i][2]!)),
+              line.substring(words[i].end,
+                  i + 1 < words.length ? words[i + 1].start : line.length)),
+      ],
+    ));
   }
+  alignLyricAuxiliaryLines(
+    lines,
+    translation,
+    readExisting: (line) => (line as QrcLine).translation,
+    assign: (line, value) => (line as QrcLine).translation = value,
+  );
   return Qrc(normalizeSyncLyricLines(
       lines, (start, length) => QrcLine(start, length, [])));
 }

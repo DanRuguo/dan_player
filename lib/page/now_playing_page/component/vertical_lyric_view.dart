@@ -827,6 +827,9 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   int _readingGeometryRevision = 0;
   int _readingAvailabilityRevision = 0;
   bool _hasJapaneseReadings = false;
+  int _englishGeometryRevision = 0;
+  int _englishAvailabilityRevision = 0;
+  bool _hasEnglishPhonetics = false;
   bool _projectedReadingGeometryChanged = false;
   bool _projectedReadingAvailabilityChanged = false;
   bool _projectionAnchorCaptured = false;
@@ -862,10 +865,18 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
   int _readingReflowGeneration = 0;
   bool _dragging = false;
   final _scrollPointers = <int>{};
-  Object? _geometryIdentity;
-  Object? _presentationIdentity;
-  Object? _displayIdentity;
-  Object? _fontIdentity;
+  (
+    double,
+    double,
+    double,
+    double,
+    LyricTextAlign,
+    TextScaler,
+    double,
+  )? _geometryIdentity;
+  (double, double, LyricTextAlign, double)? _presentationIdentity;
+  (bool, bool, bool, bool, bool, int, int)? _displayIdentity;
+  (double, double)? _fontIdentity;
   bool _fontSettingActive = false;
   bool _snapFontOnLineChange = false;
   bool _fontSnapReleaseScheduled = false;
@@ -1103,6 +1114,9 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     _hasJapaneseReadings = widget.lyric.lines.any(
       (line) => line.japaneseReadingSpans.isNotEmpty,
     );
+    _hasEnglishPhonetics = widget.lyric.lines.any(
+      (line) => line.englishPhoneticSpans.isNotEmpty,
+    );
     _readDestination = null;
     _readRevealGeneration++;
     _clearReadingReflowAnchor();
@@ -1190,22 +1204,38 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
 
   void _updateReadingProjection(Lyric previous) {
     final settings = context.read<LyricViewController>();
-    final geometryChanged = !_sameJapaneseReadingGeometry(
+    final jpGeometryChanged = !_sameJapaneseReadingGeometry(
       previous,
       widget.lyric,
     );
-    final availabilityChanged = previous.lines.indexed.any(
+    final enGeometryChanged = !_sameEnglishPhoneticGeometry(
+      previous,
+      widget.lyric,
+    );
+    final geometryChanged = jpGeometryChanged || enGeometryChanged;
+    final jpAvailabilityChanged = previous.lines.indexed.any(
       (entry) =>
           entry.$2.japaneseReadingSpans.isEmpty !=
           widget.lyric.lines[entry.$1].japaneseReadingSpans.isEmpty,
     );
+    final enAvailabilityChanged = previous.lines.indexed.any(
+      (entry) =>
+          entry.$2.englishPhoneticSpans.isEmpty !=
+          widget.lyric.lines[entry.$1].englishPhoneticSpans.isEmpty,
+    );
+    final availabilityChanged = jpAvailabilityChanged || enAvailabilityChanged;
     _hasJapaneseReadings = widget.lyric.lines.any(
       (line) => line.japaneseReadingSpans.isNotEmpty,
     );
+    _hasEnglishPhonetics = widget.lyric.lines.any(
+      (line) => line.englishPhoneticSpans.isNotEmpty,
+    );
     _projectedReadingGeometryChanged = geometryChanged;
     _projectedReadingAvailabilityChanged = availabilityChanged;
-    if (availabilityChanged) _readingAvailabilityRevision++;
-    if (geometryChanged && settings.showJapaneseReading) {
+    if (jpAvailabilityChanged) _readingAvailabilityRevision++;
+    if (enAvailabilityChanged) _englishAvailabilityRevision++;
+    if ((jpGeometryChanged && settings.showJapaneseReading) ||
+        (enGeometryChanged && settings.showEnglishPhonetics)) {
       _captureReadingReflowAnchor(
         document: previous,
         contentTransition: availabilityChanged &&
@@ -1236,13 +1266,31 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     // keys, viewport, media clock and follow animation; bind only their model.
     _overlaps = LyricOverlapTimeline(widget.lyric.lines);
     _presentationTimeline = LyricPresentationTimeline(widget.lyric.lines);
-    if (geometryChanged) _readingGeometryRevision++;
+    if (jpGeometryChanged) _readingGeometryRevision++;
+    if (enGeometryChanged) _englishGeometryRevision++;
   }
 
   bool _sameJapaneseReadingGeometry(Lyric previous, Lyric next) {
     for (var i = 0; i < previous.lines.length; i++) {
       final before = previous.lines[i].japaneseReadingSpans;
       final after = next.lines[i].japaneseReadingSpans;
+      if (identical(before, after)) continue;
+      if (before.length != after.length) return false;
+      for (var j = 0; j < before.length; j++) {
+        if (before[j].start != after[j].start ||
+            before[j].end != after[j].end ||
+            before[j].text != after[j].text) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  bool _sameEnglishPhoneticGeometry(Lyric previous, Lyric next) {
+    for (var i = 0; i < previous.lines.length; i++) {
+      final before = previous.lines[i].englishPhoneticSpans;
+      final after = next.lines[i].englishPhoneticSpans;
       if (identical(before, after)) continue;
       if (before.length != after.length) return false;
       for (var j = 0; j < before.length; j++) {
@@ -2055,6 +2103,10 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
       settings.showJapaneseReading && _hasJapaneseReadings,
       settings.showJapaneseReading ? _readingAvailabilityRevision : 0,
     );
+    final englishTransitionIdentity = (
+      settings.showEnglishPhonetics && _hasEnglishPhonetics,
+      settings.showEnglishPhonetics ? _englishAvailabilityRevision : 0,
+    );
     final heldReading = _readingMode &&
             !_manualScrollActive &&
             (_readDestination?.belongsTo(widget.lyric) ?? false)
@@ -2065,6 +2117,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
     final tileIdentity = (
       widget.lyric,
       readingTransitionIdentity,
+      englishTransitionIdentity,
       _currentLine,
       _singingRevision,
       reduced,
@@ -2092,6 +2145,8 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
                       : (widget.sourceIdentity, index)) &&
               previous[index].japaneseReadingTransitionIdentity ==
                   readingTransitionIdentity &&
+              previous[index].englishPhoneticTransitionIdentity ==
+                  englishTransitionIdentity &&
               previous[index].distance == _visualDistance(index) &&
               (previous[index].onPractice != null) ==
                   (widget.onPractice != null && widget.lyric is! PlainLyric) &&
@@ -2108,6 +2163,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
                   ? null
                   : (widget.sourceIdentity, index),
               japaneseReadingTransitionIdentity: readingTransitionIdentity,
+              englishPhoneticTransitionIdentity: englishTransitionIdentity,
               position: _position,
               distance: _visualDistance(index),
               opacity: LyricMotion.opacityForDistance(_visualDistance(index)),
@@ -2150,15 +2206,16 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
           settings.showTranslation,
           settings.showRomanization,
           settings.showJapaneseReading && _hasJapaneseReadings,
+          settings.showEnglishPhonetics && _hasEnglishPhonetics,
           settings.showTimestamps,
           settings.showJapaneseReading ? _readingGeometryRevision : 0,
+          settings.showEnglishPhonetics ? _englishGeometryRevision : 0,
         );
         final geometryChanged =
             _geometryIdentity != null && _geometryIdentity != geometryIdentity;
         final presentationChanged = _presentationIdentity != null &&
             _presentationIdentity != presentationIdentity;
-        final previousPresentation =
-            _presentationIdentity as (double, double, LyricTextAlign, double)?;
+        final previousPresentation = _presentationIdentity;
         final spacingOnlyChange = previousPresentation != null &&
             previousPresentation.$1 == settings.lyricFontSize &&
             previousPresentation.$2 == settings.translationFontSize &&
@@ -2174,15 +2231,15 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
                 previousPresentation.$2 != settings.translationFontSize);
         final displayChanged =
             _displayIdentity != null && _displayIdentity != displayIdentity;
-        final previousDisplay =
-            _displayIdentity as (bool, bool, bool, bool, int)?;
+        final previousDisplay = _displayIdentity;
         // A replacement reading with unchanged availability only reflows its
         // geometry. No reveal tween runs, so it must not wait for its onEnd.
         final contentTransition = displayChanged &&
             !reduced &&
             (!_projectedReadingGeometryChanged ||
                 _projectedReadingAvailabilityChanged ||
-                previousDisplay?.$3 != displayIdentity.$3);
+                previousDisplay?.$3 != displayIdentity.$3 ||
+                previousDisplay?.$4 != displayIdentity.$4);
         if ((geometryChanged || displayChanged) && !_projectionAnchorCaptured) {
           _captureReadingReflowAnchor(
             contentTransition: contentTransition,
@@ -2240,15 +2297,7 @@ class _VerticalLyricScrollViewState extends State<VerticalLyricScrollView>
               _currentLine >= 0 &&
               _currentLine < _lineKeys.length &&
               _scrollController.hasClients) {
-            final previousGeometry = _geometryIdentity as (
-              double,
-              double,
-              double,
-              double,
-              LyricTextAlign,
-              TextScaler,
-              double,
-            )?;
+            final previousGeometry = _geometryIdentity;
             final previousAnchor = _anchorGeometry;
             final position = _scrollController.position;
             if (previousGeometry != null && previousAnchor != null) {
